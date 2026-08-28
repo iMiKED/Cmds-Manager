@@ -48,7 +48,10 @@ If you like Cmds Manager or it saves you time, you can support the author:
 - Keep scripts at the top level or drag them into, between, and out of folders
 - Reorder folders and scripts with a precise insertion line; pause over a
   closed folder to expand it before dropping at an exact position
-- Give every folder one of ten vector icons and one of ten theme-aware colors
+- Choose one of 30 vector icons and 12 theme-aware colors from a compact popup
+  embedded in the folder-name field
+- Keep drag-and-drop feedback smooth with double-buffered rows and a narrowly
+  invalidated insertion line
 - Start, stop, or restart a folder to apply the action to all descendant scripts
 - Start or stop one script, all selected scripts, or the complete managed set
 - Open script files in an external editor without executing them accidentally

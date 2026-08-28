@@ -343,6 +343,7 @@ namespace CmdsManager.Presentation.Theming
         private readonly TextBox _editor;
         private AppThemePalette _palette = AppThemePalette.Light();
         private bool _hot;
+        private int _leadingInset;
 
         internal FluentTextBox()
         {
@@ -380,6 +381,17 @@ namespace CmdsManager.Presentation.Theming
         }
 
         internal bool ReadOnly { get { return _editor.ReadOnly; } set { _editor.ReadOnly = value; } }
+        internal int LeadingInset
+        {
+            get { return _leadingInset; }
+            set
+            {
+                var normalized = Math.Max(0, value);
+                if (_leadingInset == normalized) return;
+                _leadingInset = normalized;
+                LayoutEditor();
+            }
+        }
 
         internal void SelectAll()
         {
@@ -436,8 +448,9 @@ namespace CmdsManager.Presentation.Theming
         {
             if (_editor == null) return;
             var editorHeight = _editor.PreferredHeight;
-            _editor.SetBounds(HorizontalTextMargin, Math.Max(0, (Height - editorHeight) / 2),
-                Math.Max(1, Width - HorizontalTextMargin * 2), editorHeight);
+            var editorLeft = HorizontalTextMargin + _leadingInset;
+            _editor.SetBounds(editorLeft, Math.Max(0, (Height - editorHeight) / 2),
+                Math.Max(1, Width - editorLeft - HorizontalTextMargin), editorHeight);
         }
 
         private void TrackHover(Control control)

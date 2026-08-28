@@ -55,7 +55,8 @@ unless the selected folder allows the application to update its INI and logs.
 
 - Add, edit, and remove script entries without deleting the script files;
 - organize scripts in nested folders or keep them at the top level;
-- create, rename, recolor, and choose an icon for each folder;
+- create or rename a folder and choose one of 30 vector icons and 12 colors from
+  the popup embedded in its name field;
 - drag scripts and folders between levels or reorder them using the insertion
   line; hover over a closed folder to expand it before dropping at a position;
 - start or stop a folder to start or stop every enabled descendant script;
@@ -180,10 +181,12 @@ The history below is derived from the Git commits of the application.
 
 1.2.0 - 29.08.2026
 - Added nested folders while retaining the existing Fluent table columns;
-- added a compact project-style folder editor with ten vector icons and ten
-  icon colors for both light and dark themes;
+- added a compact folder editor whose name field contains the selected icon and
+  opens a 6x2 color grid plus a 6x5 grid of 30 vector icons;
 - added shared drag-and-drop ordering for folders and scripts, root-level
   extraction, a precise insertion line, and delayed folder expansion on hover;
+- removed the decorative file glyph beside script names and made drag feedback
+  double-buffered with repainting limited to the changed insertion line;
 - made folder Start, Stop, and Restart act on every descendant script and show
   an aggregate execution state;
 - added persistent folder expansion, parent and ordering fields to INI schema
@@ -605,8 +608,10 @@ SortOrder
   Manager normalizes values after a move.
 
 Icon
-  Folder, Terminal, Code, Lightning, Rocket, Gear, Database, Server, Globe, or
-  Star. Default: Folder.
+  One of: Folder, Terminal, Code, Lightning, Rocket, Gear, Database, Server,
+  Globe, Star, Money, Book, Graduation, Pencil, Music, Trash, Scissors,
+  Palette, Stethoscope, Lotus, Briefcase, Chart, Dumbbell, Scales, Wrench, Paw,
+  Flask, Brain, Heart, or Gift. Default: Folder.
 
 IconColor
   Folder icon color in #RRGGBB format. Default: #4F46E5.
@@ -721,7 +726,8 @@ Files, если выбранная папка не позволяет обнов
 
 - Добавление, изменение и удаление записей без удаления файлов скриптов;
 - организация скриптов во вложенных папках либо на верхнем уровне;
-- создание и переименование папок, выбор их векторной иконки и цвета;
+- создание и переименование папок, выбор одной из 30 векторных иконок и 12
+  цветов во всплывающем блоке внутри поля имени;
 - перетаскивание папок и скриптов между уровнями и изменение порядка по линии
   вставки; задержка над закрытой папкой раскрывает её перед точным drop;
 - запуск или остановка папки запускает либо останавливает все вложенные скрипты;
@@ -849,11 +855,13 @@ https://github.com/iMiKED/cmds-manager?tab=readme-ov-file#support-the-project
 
 1.2.0 — 29.08.2026
 - Добавлены вложенные папки с сохранением всех столбцов Fluent-таблицы;
-- добавлен компактный редактор папки в стиле организации проектов: десять
-  векторных иконок и десять цветов для светлой и тёмной темы;
+- добавлен компактный редактор папки: выбранная иконка находится в поле имени и
+  открывает сетку цветов 6x2 и сетку из 30 векторных иконок 6x5;
 - добавлены общий порядок папок и скриптов, drag-and-drop между уровнями,
   извлечение на верхний уровень, точная линия вставки и раскрытие папки при
   задержке над ней;
+- убрана декоративная иконка файла возле имени скрипта; таблица получила двойную
+  буферизацию, а при drag-and-drop перерисовывается только изменённая линия;
 - команды запуска, остановки и перезапуска папки действуют на все вложенные
   скрипты, а строка папки показывает их суммарное состояние;
 - в схему INI 13 добавлены родитель, порядок и состояние раскрытия с
@@ -1289,8 +1297,10 @@ SortOrder
   перемещения Cmds Manager нормализует значения.
 
 Icon
-  Folder, Terminal, Code, Lightning, Rocket, Gear, Database, Server, Globe или
-  Star. По умолчанию: Folder.
+  Одно из значений: Folder, Terminal, Code, Lightning, Rocket, Gear, Database,
+  Server, Globe, Star, Money, Book, Graduation, Pencil, Music, Trash, Scissors,
+  Palette, Stethoscope, Lotus, Briefcase, Chart, Dumbbell, Scales, Wrench, Paw,
+  Flask, Brain, Heart или Gift. По умолчанию: Folder.
 
 IconColor
   Цвет иконки в формате #RRGGBB. По умолчанию: #4F46E5.

@@ -56,7 +56,27 @@ namespace CmdsManager.Domain
         Database,
         Server,
         Globe,
-        Star
+        Star,
+        Money,
+        Book,
+        Graduation,
+        Pencil,
+        Music,
+        Trash,
+        Scissors,
+        Palette,
+        Stethoscope,
+        Lotus,
+        Briefcase,
+        Chart,
+        Dumbbell,
+        Scales,
+        Wrench,
+        Paw,
+        Flask,
+        Brain,
+        Heart,
+        Gift
     }
 
     public enum ApplicationTheme

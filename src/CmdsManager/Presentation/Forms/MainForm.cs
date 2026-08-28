@@ -27,7 +27,7 @@ namespace CmdsManager.Presentation.Forms
         private readonly ShowAppHotkeyManager _showAppHotkey;
         private readonly IExecutionLog _log;
         private readonly LocalizationService _text;
-        private readonly DataGridView _grid = new DataGridView();
+        private readonly DataGridView _grid = new DoubleBufferedDataGridView();
         private readonly Font _activityFont = new Font("Segoe UI Symbol", 11f, FontStyle.Bold, GraphicsUnit.Point);
         private readonly Font _gridHeaderFont = new Font("Segoe UI", 9f, FontStyle.Bold, GraphicsUnit.Point);
         private readonly Font _folderFont = new Font("Segoe UI Semibold", 9f, FontStyle.Regular, GraphicsUnit.Point);
@@ -987,12 +987,7 @@ namespace CmdsManager.Presentation.Forms
                     folder?.Icon ?? FolderIconKind.Folder, iconColor);
                 x += 39;
             }
-            else
-            {
-                FolderIconRenderer.DrawScript(args.Graphics, new Rectangle(x + 15, centerY - 8, 16, 16),
-                    row.Selected ? _palette.SelectionText : _palette.MutedText);
-                x += 37;
-            }
+            else x += 39;
 
             var textBounds = new Rectangle(x, args.CellBounds.Top,
                 Math.Max(1, args.CellBounds.Right - x - 6), args.CellBounds.Height);
@@ -1091,9 +1086,8 @@ namespace CmdsManager.Presentation.Forms
             }
 
             args.Effect = DragDropEffects.Move;
-            _dropIndicator = indicator;
             HandleDragHoverExpansion(indicator.HoverFolderId);
-            _grid.Invalidate();
+            SetDropIndicator(indicator);
         }
 
         private void HandleGridDragDrop(object sender, DragEventArgs args)
@@ -1262,12 +1256,16 @@ namespace CmdsManager.Presentation.Forms
                 return;
             }
             if (DateTime.UtcNow - _dragHoverStartedUtc < TimeSpan.FromMilliseconds(650)) return;
-            var candidate = Configuration.Clone();
-            var candidateFolder = candidate.Folders.FirstOrDefault(item => item.Id == folderId.Value);
-            if (candidateFolder != null)
+            folder.IsExpanded = true;
+            try
             {
-                candidateFolder.IsExpanded = true;
-                SaveConfiguration(candidate);
+                _store.Save(Configuration);
+                RefreshGrid();
+            }
+            catch (Exception exception)
+            {
+                folder.IsExpanded = false;
+                _log.Warning("Unable to persist drag-hover folder expansion: " + exception.Message);
             }
             _dragHoverFolderId = null;
         }
@@ -1288,9 +1286,36 @@ namespace CmdsManager.Presentation.Forms
 
         private void ClearDropIndicator()
         {
+            var previous = _dropIndicator;
             _dropIndicator = null;
             _dragHoverFolderId = null;
-            _grid.Invalidate();
+            InvalidateDropIndicator(previous);
+        }
+
+        private void SetDropIndicator(HierarchyDropIndicator indicator)
+        {
+            if (DropIndicatorsEqual(_dropIndicator, indicator)) return;
+            var previous = _dropIndicator;
+            _dropIndicator = indicator;
+            InvalidateDropIndicator(previous);
+            InvalidateDropIndicator(indicator);
+        }
+
+        private void InvalidateDropIndicator(HierarchyDropIndicator indicator)
+        {
+            if (indicator == null || _grid.IsDisposed) return;
+            _grid.Invalidate(new Rectangle(0, Math.Max(0, indicator.LineY - 4),
+                Math.Max(1, _grid.ClientSize.Width), 9));
+        }
+
+        private static bool DropIndicatorsEqual(HierarchyDropIndicator first, HierarchyDropIndicator second)
+        {
+            if (ReferenceEquals(first, second)) return true;
+            if (first == null || second == null) return false;
+            return first.ParentFolderId == second.ParentFolderId &&
+                first.InsertIndex == second.InsertIndex &&
+                first.LineY == second.LineY && first.LineX == second.LineX &&
+                first.HoverFolderId == second.HoverFolderId;
         }
 
         private void ApplyRuntimeVisual(DataGridViewRow row, ScriptDefinition script, ScriptRuntimeSnapshot runtime)
@@ -1998,6 +2023,16 @@ namespace CmdsManager.Presentation.Forms
         private static DataGridViewTextBoxColumn Column(string name, int width)
         {
             return new DataGridViewTextBoxColumn { Name = name, Width = width, SortMode = DataGridViewColumnSortMode.NotSortable };
+        }
+
+        private sealed class DoubleBufferedDataGridView : DataGridView
+        {
+            internal DoubleBufferedDataGridView()
+            {
+                DoubleBuffered = true;
+                SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
+                    ControlStyles.ResizeRedraw, true);
+            }
         }
 
         private sealed class FolderGridRowTag

@@ -359,7 +359,7 @@ namespace CmdsManager.Tests
                 var rootFolder = new ScriptFolderDefinition
                 {
                     Name = "Operations",
-                    Icon = FolderIconKind.Terminal,
+                    Icon = FolderIconKind.Gift,
                     IconColor = "#2563EB",
                     IsExpanded = false
                 };
@@ -408,7 +408,8 @@ namespace CmdsManager.Tests
                 store.Save(configuration);
                 var reloaded = store.Reload();
                 Equal(1, reloaded.Folders.Count, "folder configuration round-trips through INI");
-                Equal(FolderIconKind.Terminal, reloaded.Folders[0].Icon, "folder icon round-trips through INI");
+                Equal(FolderIconKind.Gift, reloaded.Folders[0].Icon,
+                    "an icon from the expanded 6x5 picker round-trips through INI");
                 Equal("#2563EB", reloaded.Folders[0].IconColor, "folder icon color round-trips through INI");
                 Equal(false, reloaded.Folders[0].IsExpanded, "folder expansion state round-trips through INI");
                 Assert(File.ReadAllText(store.ConfigPath, Encoding.UTF8).Contains("[Folder:" + rootFolder.Id.ToString("D") + "]"),
@@ -961,15 +962,26 @@ namespace CmdsManager.Tests
                     Assert(settings.ClientSize.Width <= 530 && settings.ClientSize.Height <= 340, "settings dialog is narrower and compact");
                     Assert(script.ClientSize.Width <= 570 && script.ClientSize.Height <= 505,
                         "aligned script editor remains compact");
-                    Assert(folder.ClientSize.Width <= 480 && folder.ClientSize.Height <= 330,
-                        "folder editor remains a compact project-style picker");
+                    Assert(folder.ClientSize.Width <= 480 && folder.ClientSize.Height <= 140,
+                        "folder editor keeps only the compact integrated name field");
                     Equal("About", about.Text, "English About title comes from INI strings");
                     Equal("Cmds Manager settings", settings.Text, "English settings title comes from INI strings");
                     Assert(settings.BackColor.GetBrightness() < 0.3f && script.BackColor.GetBrightness() < 0.3f &&
                         folder.BackColor.GetBrightness() < 0.3f,
                         "dark application theme reaches compact dialogs");
-                    Equal(20, AllControls(folder).Count(control => control.GetType().Name == "FolderChoiceControl"),
-                        "folder editor offers ten icons and ten project-style colors");
+                    Equal(12, folder.Picker.ColorChoiceCount,
+                        "the popup folder picker offers a 6x2 color grid");
+                    Equal(30, folder.Picker.IconChoiceCount,
+                        "the popup folder picker offers a 6x5 icon grid");
+                    Equal(6, folder.Picker.ColorColumnCount, "folder color grid has six columns");
+                    Equal(6, folder.Picker.IconColumnCount, "folder icon grid has six columns");
+                    Equal("Done", folder.Picker.DoneText, "folder picker Done action comes from INI strings");
+                    Assert(ReferenceEquals(folder.IconSelector.Parent, folder.NameEditor) &&
+                        folder.NameEditor.LeadingInset >= 40,
+                        "the colored folder selector is embedded at the left of the name input");
+                    Assert(folder.Picker.BackColor.GetBrightness() < 0.3f &&
+                        folder.Picker.Controls.OfType<Button>().All(control => control.GetType().Name == "FluentButton"),
+                        "the popup picker and its Done action follow the dark Fluent palette");
                     Assert(AllControls(folder).OfType<Button>().All(control => control.GetType().Name == "FluentButton") &&
                         AllControls(folder).Count(control => control.GetType().Name == "FluentTextBox") == 1,
                         "folder editor uses Fluent name and action controls");
@@ -1435,6 +1447,8 @@ namespace CmdsManager.Tests
                     System.Windows.Forms.Application.DoEvents();
                     var grid = FindControl<DataGridView>(form);
                     Assert(grid.AllowDrop, "the Fluent hierarchy table accepts drag-and-drop moves");
+                    Equal("DoubleBufferedDataGridView", grid.GetType().Name,
+                        "the hierarchy table uses a double-buffered surface during drag-and-drop");
                     Assert(grid.Rows.Cast<DataGridViewRow>().Select(row => Convert.ToString(row.Cells["Name"].Value))
                             .SequenceEqual(new[] { "Apps", "Node", "Direct service", "Loose script" }),
                         "collapsed nested folders keep descendants hidden while preserving sibling order");
@@ -1461,6 +1475,18 @@ namespace CmdsManager.Tests
                         "the center drop target moves a script into the hovered folder");
                     Assert(lineY >= nameBounds.Top,
                         "the drag target exposes a precise horizontal insertion line");
+
+                    var setIndicator = typeof(MainForm).GetMethod("SetDropIndicator",
+                        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                    var invalidations = 0;
+                    grid.Invalidated += (sender, args) => invalidations++;
+                    setIndicator.Invoke(form, new[] { indicator });
+                    var firstIndicatorInvalidations = invalidations;
+                    Assert(firstIndicatorInvalidations > 0,
+                        "a changed drag target invalidates its insertion-line band");
+                    setIndicator.Invoke(form, new[] { indicator });
+                    Equal(firstIndicatorInvalidations, invalidations,
+                        "an unchanged drag target does not repaint the table again");
 
                     var hover = typeof(MainForm).GetMethod("HandleDragHoverExpansion",
                         System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
