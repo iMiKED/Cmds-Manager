@@ -510,7 +510,8 @@ namespace CmdsManager.Presentation.Theming
         internal FluentHotkeyBox()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
-                ControlStyles.ResizeRedraw | ControlStyles.UserPaint, true);
+                ControlStyles.ResizeRedraw | ControlStyles.UserPaint |
+                ControlStyles.SupportsTransparentBackColor, true);
             MinimumSize = new Size(120, ControlHeight);
             Size = new Size(170, ControlHeight);
             Height = ControlHeight;
@@ -559,12 +560,11 @@ namespace CmdsManager.Presentation.Theming
         public void ApplyPalette(AppThemePalette palette)
         {
             _palette = palette ?? AppThemePalette.Light();
-            BackColor = _palette.Input;
+            BackColor = Color.Transparent;
             ForeColor = Enabled ? _palette.Text : _palette.DisabledText;
             _editor.BackColor = _palette.Input;
             _editor.ForeColor = Enabled ? _palette.Text : _palette.DisabledText;
             _editor.BorderStyle = BorderStyle.None;
-            FluentGeometry.ApplyRoundedRegion(this, CornerRadius);
             Invalidate(true);
         }
 
@@ -578,20 +578,24 @@ namespace CmdsManager.Presentation.Theming
         {
             base.OnResize(args);
             LayoutEditor();
-            FluentGeometry.ApplyRoundedRegion(this, CornerRadius);
+        }
+
+        protected override void OnPaintBackground(PaintEventArgs args)
+        {
+            args.Graphics.Clear(Parent?.BackColor ?? _palette.Window);
         }
 
         protected override void OnPaint(PaintEventArgs args)
         {
-            using (var path = FluentGeometry.RoundedRectangle(
-                new RectangleF(0.5f, 0.5f, Math.Max(1f, Width - 1f), Math.Max(1f, Height - 1f)), CornerRadius))
-            using (var pen = new Pen(_editor.Focused ? _palette.Accent :
-                _hot ? _palette.MutedText : _palette.Border, 1f)
+            args.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            args.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            var bounds = FluentGeometry.SymmetricControlBounds(ClientSize);
+            using (var path = FluentGeometry.RoundedRectangle(bounds, CornerRadius))
+            using (var background = new SolidBrush(_palette.Input))
+            using (var pen = new Pen(ContainsFocus ? _palette.Accent :
+                _hot ? _palette.MutedText : _palette.Border, 1f))
             {
-                Alignment = PenAlignment.Inset
-            })
-            {
-                args.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                args.Graphics.FillPath(background, path);
                 args.Graphics.DrawPath(pen, path);
             }
         }
@@ -699,7 +703,6 @@ namespace CmdsManager.Presentation.Theming
             FlatStyle = FlatStyle.Flat;
             DrawMode = DrawMode.OwnerDrawFixed;
             ItemHeight = Math.Max(20, Font.Height + 5);
-            FluentGeometry.ApplyRoundedRegion(this, 5f);
             Invalidate();
         }
 
@@ -726,7 +729,7 @@ namespace CmdsManager.Presentation.Theming
         protected override void OnResize(EventArgs args)
         {
             base.OnResize(args);
-            FluentGeometry.ApplyRoundedRegion(this, 5f);
+            Invalidate();
         }
 
         protected override void OnMouseEnter(EventArgs args)
@@ -772,15 +775,22 @@ namespace CmdsManager.Presentation.Theming
             using (var graphics = Graphics.FromHwnd(Handle))
             {
                 graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                var arrowArea = new Rectangle(Math.Max(1, Width - 27), 1, 26, Math.Max(1, Height - 2));
-                using (var brush = new SolidBrush(_palette.Input)) graphics.FillRectangle(brush, arrowArea);
-                using (var path = FluentGeometry.RoundedRectangle(
-                    new RectangleF(0.5f, 0.5f, Math.Max(1f, Width - 1f), Math.Max(1f, Height - 1f)), 5f))
-                using (var pen = new Pen(Focused || DroppedDown ? _palette.Accent :
-                    _hot ? _palette.MutedText : _palette.Border, 1f) { Alignment = PenAlignment.Inset })
+                graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                var canvas = Parent?.BackColor ?? _palette.Window;
+                graphics.Clear(canvas);
+                var bounds = FluentGeometry.SymmetricControlBounds(ClientSize);
+                using (var path = FluentGeometry.RoundedRectangle(bounds, 5f))
+                using (var background = new SolidBrush(_palette.Input))
                 {
-                    graphics.DrawPath(pen, path);
+                    graphics.FillPath(background, path);
                 }
+
+                var displayText = SelectedIndex >= 0 ? GetItemText(SelectedItem) : Text;
+                var textBounds = new Rectangle(8, 1, Math.Max(0, Width - 42), Math.Max(1, Height - 2));
+                TextRenderer.DrawText(graphics, displayText, Font, textBounds,
+                    Enabled ? _palette.Text : _palette.DisabledText,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
+                    TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
 
                 var centerX = Width - 13f;
                 var centerY = Height / 2f;
@@ -793,6 +803,11 @@ namespace CmdsManager.Presentation.Theming
                     graphics.DrawLine(pen, centerX - 3.5f, centerY - 1.5f, centerX, centerY + 2f);
                     graphics.DrawLine(pen, centerX, centerY + 2f, centerX + 3.5f, centerY - 1.5f);
                 }
+
+                using (var path = FluentGeometry.RoundedRectangle(bounds, 5f))
+                using (var pen = new Pen(Focused || DroppedDown ? _palette.Accent :
+                    _hot ? _palette.MutedText : _palette.Border, 1f))
+                    graphics.DrawPath(pen, path);
             }
         }
     }
@@ -808,7 +823,8 @@ namespace CmdsManager.Presentation.Theming
         internal FluentNumericUpDown()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
-                ControlStyles.ResizeRedraw | ControlStyles.UserPaint, true);
+                ControlStyles.ResizeRedraw | ControlStyles.UserPaint |
+                ControlStyles.SupportsTransparentBackColor, true);
             MinimumSize = new Size(0, ControlHeight);
             Size = new Size(72, ControlHeight);
             Height = ControlHeight;
@@ -839,7 +855,7 @@ namespace CmdsManager.Presentation.Theming
         public void ApplyPalette(AppThemePalette palette)
         {
             _palette = palette ?? AppThemePalette.Light();
-            BackColor = _palette.Input;
+            BackColor = Color.Transparent;
             ForeColor = _palette.Text;
             _valueControl.BackColor = _palette.Input;
             _valueControl.ForeColor = _palette.Text;
@@ -852,7 +868,6 @@ namespace CmdsManager.Presentation.Theming
                 if (editor != null) editor.BorderStyle = BorderStyle.None;
             }
             AttachButtonPainter();
-            FluentGeometry.ApplyRoundedRegion(this, CornerRadius);
             Invalidate(true);
         }
 
@@ -866,20 +881,25 @@ namespace CmdsManager.Presentation.Theming
         {
             base.OnResize(args);
             LayoutEditor();
-            FluentGeometry.ApplyRoundedRegion(this, CornerRadius);
+        }
+
+        protected override void OnPaintBackground(PaintEventArgs args)
+        {
+            args.Graphics.Clear(Parent?.BackColor ?? _palette.Window);
         }
 
         protected override void OnPaint(PaintEventArgs args)
         {
             base.OnPaint(args);
-            using (var path = FluentGeometry.RoundedRectangle(
-                new RectangleF(0.5f, 0.5f, Math.Max(1f, Width - 1f), Math.Max(1f, Height - 1f)), CornerRadius))
-            using (var pen = new Pen(_valueControl.Focused ? _palette.Accent : _hot ? _palette.MutedText : _palette.Border, 1f)
+            args.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            args.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            var bounds = FluentGeometry.SymmetricControlBounds(ClientSize);
+            using (var path = FluentGeometry.RoundedRectangle(bounds, CornerRadius))
+            using (var background = new SolidBrush(_palette.Input))
+            using (var pen = new Pen(ContainsFocus ? _palette.Accent :
+                _hot ? _palette.MutedText : _palette.Border, 1f))
             {
-                Alignment = PenAlignment.Inset
-            })
-            {
-                args.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                args.Graphics.FillPath(background, path);
                 args.Graphics.DrawPath(pen, path);
             }
         }

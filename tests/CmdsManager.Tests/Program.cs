@@ -1151,6 +1151,9 @@ namespace CmdsManager.Tests
                         "all hotkey inputs share one left edge across categories");
                     Equal(1, hotkeyBoxes.Select(control => control.Width).Distinct().Count(),
                         "all hotkey inputs have the same width");
+                    Assert(hotkeyBoxes.All(control => control.Region == null && control.BackColor.A == 0 &&
+                            HasSymmetricControlBounds(control)),
+                        "hotkey capture fields use one symmetric antialiased contour without a clipped Region");
                     var resetButtons = AllControls(settings).OfType<Button>()
                         .Where(control => control.Text == text["Settings.HotkeyReset"]).ToArray();
                     Equal(hotkeyBoxes.Length, resetButtons.Length,
@@ -1233,14 +1236,15 @@ namespace CmdsManager.Tests
                         settingsNativeTextEditors.Length == 4 &&
                         settingsNativeTextEditors.All(control => control.BorderStyle == BorderStyle.None),
                         "settings Fluent text fields use a taller custom border around the native editor");
-                    Assert(AllControls(settings).Where(control => control.GetType().Name == "FluentNumericUpDown")
-                            .All(control => control.Height >= 28) &&
+                    var settingsNumericInputs = AllControls(settings).OfType<FluentNumericUpDown>().ToArray();
+                    Assert(settingsNumericInputs.All(control => control.Height >= 28 &&
+                            control.Region == null && control.BackColor.A == 0 &&
+                            (control.ClientSize.Width <= 2 || HasSymmetricControlBounds(control))) &&
                         AllControls(settings).OfType<NumericUpDown>().All(control =>
                             control.BorderStyle == BorderStyle.None && control.Parent.GetType().Name == "FluentNumericUpDown"),
-                        "settings Fluent numeric fields use a taller custom border around the native editor");
+                        "settings Fluent numeric fields use one symmetric contour around the native stepper");
                     var numeric = AllControls(script).OfType<NumericUpDown>().ToArray();
-                    var fluentNumeric = AllControls(script)
-                        .Where(control => control.GetType().Name == "FluentNumericUpDown").ToArray();
+                    var fluentNumeric = AllControls(script).OfType<FluentNumericUpDown>().ToArray();
                     Equal(3, numeric.Length, "script editor has three compact numeric settings");
                     Equal(3, fluentNumeric.Length, "script editor wraps every numeric setting in Fluent chrome");
                     Assert(numeric.All(control => control.Width <= 65 && control.BorderStyle == BorderStyle.None) &&
@@ -1266,6 +1270,14 @@ namespace CmdsManager.Tests
                     Equal(5, alignedCombos.Length, "script editor exposes the folder and four launch selectors");
                     Assert(alignedCombos.Select(control => AbsoluteLeft(control, script)).Distinct().Count() == 1,
                         "script drop-downs share one left edge");
+                    var fluentCombos = AllControls(settings).OfType<FluentComboBox>()
+                        .Concat(alignedCombos.OfType<FluentComboBox>()).ToArray();
+                    Assert(fluentCombos.Length == 7 && fluentCombos.All(control =>
+                            control.Region == null && HasSymmetricControlBounds(control)),
+                        "all drop-down fields use one symmetric antialiased contour without a clipped Region");
+                    Assert(fluentNumeric.All(control => control.Region == null && control.BackColor.A == 0 &&
+                            HasSymmetricControlBounds(control)),
+                        "script numeric steppers use the same symmetric unclipped input geometry");
                     var alignedChecks = AllControls(script).OfType<CheckBox>()
                         .Where(control => control.Text != text["Script.Enabled"]).ToArray();
                     Assert(alignedChecks.Select(control => AbsoluteLeft(control, script)).Distinct().Count() == 1,
@@ -2597,6 +2609,14 @@ namespace CmdsManager.Tests
                 control = control.Parent;
             }
             return result;
+        }
+
+        private static bool HasSymmetricControlBounds(Control control)
+        {
+            if (control == null) return false;
+            var bounds = FluentGeometry.SymmetricControlBounds(control.ClientSize);
+            return Math.Abs(bounds.Left - (control.ClientSize.Width - bounds.Right)) < 0.01f &&
+                Math.Abs(bounds.Top - (control.ClientSize.Height - bounds.Bottom)) < 0.01f;
         }
 
         private static bool WaitWithUi(Func<bool> condition, TimeSpan timeout)
