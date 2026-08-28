@@ -30,7 +30,6 @@ namespace CmdsManager.Presentation.Forms
         private readonly DataGridView _grid = new DoubleBufferedDataGridView();
         private readonly Font _activityFont = new Font("Segoe UI Symbol", 11f, FontStyle.Bold, GraphicsUnit.Point);
         private readonly Font _gridHeaderFont = new Font("Segoe UI", 9f, FontStyle.Bold, GraphicsUnit.Point);
-        private readonly Font _folderFont = new Font("Segoe UI Semibold", 9f, FontStyle.Regular, GraphicsUnit.Point);
         private readonly ToolStripTextBox _filter = new ToolStripTextBox();
         private readonly ToolStrip _toolbar;
         private readonly Dictionary<ToolStripButton, ToolbarIcon> _toolbarIcons =
@@ -360,7 +359,6 @@ namespace CmdsManager.Presentation.Forms
                 }
                 _activityFont.Dispose();
                 _gridHeaderFont.Dispose();
-                _folderFont.Dispose();
             }
             base.Dispose(disposing);
         }
@@ -519,7 +517,6 @@ namespace CmdsManager.Presentation.Forms
             row.Tag = new FolderGridRowTag(folder.Id);
             row.Cells["Name"].Tag = new HierarchyRowMetadata(HierarchyItemKey.Folder(folder.Id), depth,
                 folder.ParentFolderId, ancestors, folder.IsExpanded);
-            row.Cells["Name"].Style.Font = _folderFont;
             ApplyFolderRuntimeVisual(row, runtime, scripts.Count == 0);
             SelectRowIfNeeded(row, selectedItem);
         }
@@ -962,7 +959,8 @@ namespace CmdsManager.Presentation.Forms
             args.PaintBackground(args.ClipBounds, true);
             var textColor = row.Selected ? _palette.SelectionText : row.DefaultCellStyle.ForeColor;
             if (textColor.IsEmpty) textColor = _palette.Text;
-            var x = args.CellBounds.Left + 8 + metadata.Depth * 18;
+            var hierarchyLeft = args.CellBounds.Left + 8 + metadata.Depth * 18;
+            var x = args.CellBounds.Left + HierarchyNameTextOffset(metadata);
             var centerY = args.CellBounds.Top + args.CellBounds.Height / 2;
             if (metadata.Item.Kind == HierarchyItemKind.Folder)
             {
@@ -972,31 +970,35 @@ namespace CmdsManager.Presentation.Forms
                     pen.EndCap = System.Drawing.Drawing2D.LineCap.Round;
                     if (metadata.IsExpanded)
                     {
-                        args.Graphics.DrawLine(pen, x + 2, centerY - 2, x + 6, centerY + 2);
-                        args.Graphics.DrawLine(pen, x + 6, centerY + 2, x + 10, centerY - 2);
+                        args.Graphics.DrawLine(pen, hierarchyLeft + 2, centerY - 2, hierarchyLeft + 6, centerY + 2);
+                        args.Graphics.DrawLine(pen, hierarchyLeft + 6, centerY + 2, hierarchyLeft + 10, centerY - 2);
                     }
                     else
                     {
-                        args.Graphics.DrawLine(pen, x + 3, centerY - 4, x + 7, centerY);
-                        args.Graphics.DrawLine(pen, x + 7, centerY, x + 3, centerY + 4);
+                        args.Graphics.DrawLine(pen, hierarchyLeft + 3, centerY - 4, hierarchyLeft + 7, centerY);
+                        args.Graphics.DrawLine(pen, hierarchyLeft + 7, centerY, hierarchyLeft + 3, centerY + 4);
                     }
                 }
                 var folder = Configuration.Folders.FirstOrDefault(item => item.Id == metadata.Item.Id);
                 var iconColor = FolderIconRenderer.ParseColor(folder?.IconColor, _palette.Accent);
-                FolderIconRenderer.Draw(args.Graphics, new Rectangle(x + 15, centerY - 9, 18, 18),
+                FolderIconRenderer.Draw(args.Graphics, new Rectangle(hierarchyLeft + 15, centerY - 9, 18, 18),
                     folder?.Icon ?? FolderIconKind.Folder, iconColor);
-                x += 39;
             }
-            else x += 39;
-
             var textBounds = new Rectangle(x, args.CellBounds.Top,
                 Math.Max(1, args.CellBounds.Right - x - 6), args.CellBounds.Height);
             TextRenderer.DrawText(args.Graphics, Convert.ToString(args.FormattedValue),
-                metadata.Item.Kind == HierarchyItemKind.Folder ? _folderFont : args.CellStyle.Font,
+                args.CellStyle.Font,
                 textBounds, textColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
                 TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.PreserveGraphicsClipping);
             args.Paint(args.ClipBounds, DataGridViewPaintParts.Border | DataGridViewPaintParts.Focus);
             args.Handled = true;
+        }
+
+        private static int HierarchyNameTextOffset(HierarchyRowMetadata metadata)
+        {
+            if (metadata == null) return 8;
+            return 8 + metadata.Depth * 18 +
+                (metadata.Item.Kind == HierarchyItemKind.Folder ? 39 : 2);
         }
 
         private void HandleGridCellMouseClick(object sender, DataGridViewCellMouseEventArgs args)

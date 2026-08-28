@@ -982,6 +982,15 @@ namespace CmdsManager.Tests
                     Assert(folder.Picker.BackColor.GetBrightness() < 0.3f &&
                         folder.Picker.Controls.OfType<Button>().All(control => control.GetType().Name == "FluentButton"),
                         "the popup picker and its Done action follow the dark Fluent palette");
+                    using (var iconBitmap = new Bitmap(24, 24))
+                    using (var iconGraphics = Graphics.FromImage(iconBitmap))
+                    {
+                        iconGraphics.Clear(Color.White);
+                        FolderIconRenderer.Draw(iconGraphics, new Rectangle(0, 0, 24, 24),
+                            FolderIconKind.Folder, Color.Red);
+                        Equal(Color.White.ToArgb(), iconBitmap.GetPixel(12, 14).ToArgb(),
+                            "the reference folder glyph is an outline without the old translucent fill");
+                    }
                     Assert(AllControls(folder).OfType<Button>().All(control => control.GetType().Name == "FluentButton") &&
                         AllControls(folder).Count(control => control.GetType().Name == "FluentTextBox") == 1,
                         "folder editor uses Fluent name and action controls");
@@ -1452,6 +1461,16 @@ namespace CmdsManager.Tests
                     Assert(grid.Rows.Cast<DataGridViewRow>().Select(row => Convert.ToString(row.Cells["Name"].Value))
                             .SequenceEqual(new[] { "Apps", "Node", "Direct service", "Loose script" }),
                         "collapsed nested folders keep descendants hidden while preserving sibling order");
+                    var appsNameCell = grid.Rows.Cast<DataGridViewRow>()
+                        .Single(row => Convert.ToString(row.Cells["Name"].Value) == "Apps").Cells["Name"];
+                    var looseNameCell = grid.Rows.Cast<DataGridViewRow>()
+                        .Single(row => Convert.ToString(row.Cells["Name"].Value) == "Loose script").Cells["Name"];
+                    Equal(looseNameCell.InheritedStyle.Font, appsNameCell.InheritedStyle.Font,
+                        "folder and script names use the same table font");
+                    var nameOffset = typeof(MainForm).GetMethod("HierarchyNameTextOffset",
+                        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+                    Equal(10, (int)nameOffset.Invoke(null, new[] { looseNameCell.Tag }),
+                        "a top-level script name no longer reserves space for the removed file glyph");
 
                     var nodeRow = grid.Rows.Cast<DataGridViewRow>()
                         .Single(row => Convert.ToString(row.Cells["Name"].Value) == "Node");

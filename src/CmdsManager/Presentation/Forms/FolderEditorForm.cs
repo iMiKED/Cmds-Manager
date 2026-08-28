@@ -147,7 +147,7 @@ namespace CmdsManager.Presentation.Forms
 
         private void LayoutIconButton()
         {
-            _iconButton.SetBounds(1, 1, 40, Math.Max(1, _name.Height - 2));
+            _iconButton.SetBounds(2, 2, 40, Math.Max(1, _name.Height - 4));
         }
 
         private void ShowIconPicker(object sender, EventArgs args)
@@ -257,21 +257,32 @@ namespace CmdsManager.Presentation.Forms
 
             protected override void OnPaint(PaintEventArgs args)
             {
-                args.Graphics.Clear(_hot || Focused ? _palette.Hover : _palette.SurfaceAlternate);
+                args.Graphics.Clear(_palette.Input);
                 args.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                using (var background = LeadingBackgroundPath(ClientRectangle, 4f))
+                using (var brush = new SolidBrush(_hot || Focused ? _palette.Hover : _palette.SurfaceAlternate))
+                    args.Graphics.FillPath(brush, background);
                 using (var divider = new Pen(_palette.Border))
-                    args.Graphics.DrawLine(divider, Width - 1, 4, Width - 1, Height - 5);
+                    args.Graphics.DrawLine(divider, Width - 1, 3, Width - 1, Height - 4);
                 FolderIconRenderer.Draw(args.Graphics,
                     new Rectangle((Width - 21) / 2, (Height - 21) / 2, 21, 21), Icon,
                     FolderIconRenderer.ParseColor(IconColor, _palette.Accent));
-                if (Focused && ShowFocusCues)
-                {
-                    var focus = ClientRectangle;
-                    focus.Inflate(-3, -3);
-                    using (var path = FluentGeometry.RoundedRectangle(focus, 5f))
-                    using (var pen = new Pen(_palette.Accent, 1.25f))
-                        args.Graphics.DrawPath(pen, path);
-                }
+            }
+
+            private static GraphicsPath LeadingBackgroundPath(Rectangle bounds, float radius)
+            {
+                var path = new GraphicsPath();
+                var right = Math.Max(bounds.Left + radius, bounds.Right - 1f);
+                var bottom = Math.Max(bounds.Top + radius, bounds.Bottom - 1f);
+                var diameter = radius * 2f;
+                path.AddLine(bounds.Left + radius, bounds.Top, right, bounds.Top);
+                path.AddLine(right, bounds.Top, right, bottom);
+                path.AddLine(right, bottom, bounds.Left + radius, bottom);
+                path.AddArc(bounds.Left, bottom - diameter, diameter, diameter, 90f, 90f);
+                path.AddLine(bounds.Left, bottom - radius, bounds.Left, bounds.Top + radius);
+                path.AddArc(bounds.Left, bounds.Top, diameter, diameter, 180f, 90f);
+                path.CloseFigure();
+                return path;
             }
         }
 
@@ -477,7 +488,7 @@ namespace CmdsManager.Presentation.Forms
                 var cell = ColorCell(index);
                 var selected = string.Equals(FolderIconRenderer.ColorPalette[index], SelectedColor,
                     StringComparison.OrdinalIgnoreCase);
-                var hovered = index == _hoverColor;
+                var hovered = index == _hoverColor || Focused && _focusedItem == index;
                 var diameter = selected ? 28 : hovered ? 24 : 20;
                 var circle = new Rectangle(cell.Left + (cell.Width - diameter) / 2,
                     cell.Top + (cell.Height - diameter) / 2, diameter, diameter);
@@ -490,40 +501,25 @@ namespace CmdsManager.Presentation.Forms
                 using (var brush = new SolidBrush(FolderIconRenderer.ParseColor(
                     FolderIconRenderer.ColorPalette[index], _palette.Accent)))
                     graphics.FillEllipse(brush, circle);
-                if (Focused && _focusedItem == index)
-                {
-                    var focus = cell;
-                    focus.Inflate(-5, -3);
-                    using (var path = FluentGeometry.RoundedRectangle(focus, 7f))
-                    using (var pen = new Pen(_palette.Accent, 1.25f))
-                        graphics.DrawPath(pen, path);
-                }
             }
 
             private void PaintIcon(Graphics graphics, int index)
             {
                 var cell = IconCell(index);
                 var selected = FolderIconRenderer.PickerIcons[index] == SelectedIcon;
-                if (selected || index == _hoverIcon)
+                var focused = Focused && _focusedItem == FolderIconRenderer.ColorPalette.Length + index;
+                if (selected || index == _hoverIcon || focused)
                 {
                     var tile = cell;
                     tile.Inflate(-5, -3);
                     using (var path = FluentGeometry.RoundedRectangle(tile, 7f))
-                    using (var brush = new SolidBrush(selected ? _palette.Hover : _palette.SurfaceAlternate))
+                    using (var brush = new SolidBrush(selected || focused ? _palette.Hover : _palette.SurfaceAlternate))
                         graphics.FillPath(brush, path);
                 }
                 FolderIconRenderer.Draw(graphics,
                     new Rectangle(cell.Left + (cell.Width - 23) / 2, cell.Top + (cell.Height - 23) / 2, 23, 23),
                     FolderIconRenderer.PickerIcons[index],
                     FolderIconRenderer.ParseColor(SelectedColor, _palette.Accent));
-                if (Focused && _focusedItem == FolderIconRenderer.ColorPalette.Length + index)
-                {
-                    var focus = cell;
-                    focus.Inflate(-4, -2);
-                    using (var path = FluentGeometry.RoundedRectangle(focus, 7f))
-                    using (var pen = new Pen(_palette.Accent, 1.25f))
-                        graphics.DrawPath(pen, path);
-                }
             }
 
             private static Rectangle ColorCell(int index)

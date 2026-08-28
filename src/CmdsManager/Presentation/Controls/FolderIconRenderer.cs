@@ -154,7 +154,7 @@ namespace CmdsManager.Presentation.Controls
                             DrawGift(graphics, pen);
                             break;
                         default:
-                            DrawFolder(graphics, pen, brush);
+                            DrawFolder(graphics, pen);
                             break;
                     }
                 }
@@ -165,18 +165,22 @@ namespace CmdsManager.Presentation.Controls
             }
         }
 
-        private static void DrawFolder(Graphics graphics, Pen pen, Brush brush)
+        private static void DrawFolder(Graphics graphics, Pen pen)
         {
-            using (var fill = new SolidBrush(Color.FromArgb(42, ((SolidBrush)brush).Color)))
             using (var path = new GraphicsPath())
             {
-                path.AddLine(2f, 6.5f, 9f, 6.5f);
-                path.AddLine(9f, 6.5f, 11f, 9f);
-                path.AddLine(11f, 9f, 21.5f, 9f);
-                path.AddLine(21.5f, 9f, 21.5f, 19.5f);
-                path.AddLine(21.5f, 19.5f, 2f, 19.5f);
+                path.AddLine(3f, 7.5f, 3f, 6.5f);
+                path.AddBezier(3f, 6.5f, 3f, 5.4f, 3.9f, 4.5f, 5f, 4.5f);
+                path.AddLine(5f, 4.5f, 9.2f, 4.5f);
+                path.AddBezier(9.2f, 4.5f, 9.8f, 4.5f, 10.3f, 4.8f, 10.7f, 5.3f);
+                path.AddLine(10.7f, 5.3f, 12.3f, 7.5f);
+                path.AddLine(12.3f, 7.5f, 19f, 7.5f);
+                path.AddBezier(19f, 7.5f, 20.1f, 7.5f, 21f, 8.4f, 21f, 9.5f);
+                path.AddLine(21f, 9.5f, 21f, 18f);
+                path.AddBezier(21f, 18f, 21f, 19.1f, 20.1f, 20f, 19f, 20f);
+                path.AddLine(19f, 20f, 5f, 20f);
+                path.AddBezier(5f, 20f, 3.9f, 20f, 3f, 19.1f, 3f, 18f);
                 path.CloseFigure();
-                graphics.FillPath(fill, path);
                 graphics.DrawPath(pen, path);
             }
         }
