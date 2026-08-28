@@ -19,7 +19,7 @@ namespace CmdsManager.Presentation.Forms
         private readonly FluentTextBox _name = new FluentTextBox();
         private readonly FolderIconButton _iconButton = new FolderIconButton();
         private readonly FolderPickerControl _picker;
-        private readonly ToolStripDropDown _pickerDropDown = new ToolStripDropDown();
+        private readonly FolderPickerDropDown _pickerDropDown = new FolderPickerDropDown();
         private readonly ToolTip _toolTip = new ToolTip();
         private FolderIconKind _selectedIcon;
         private string _selectedColor;
@@ -70,18 +70,8 @@ namespace CmdsManager.Presentation.Forms
                 Margin = Padding.Empty,
                 Padding = Padding.Empty
             };
-            _pickerDropDown.AutoClose = true;
-            _pickerDropDown.AutoSize = true;
-            _pickerDropDown.DropShadowEnabled = true;
-            _pickerDropDown.Margin = Padding.Empty;
-            _pickerDropDown.Padding = Padding.Empty;
             _pickerDropDown.Items.Add(host);
-            _pickerDropDown.Opened += (sender, args) =>
-            {
-                FluentGeometry.ApplyRoundedRegion(_pickerDropDown, 9f);
-                _picker.FocusSelectedItem();
-            };
-            _pickerDropDown.SizeChanged += (sender, args) => FluentGeometry.ApplyRoundedRegion(_pickerDropDown, 9f);
+            _pickerDropDown.Opened += (sender, args) => _picker.FocusSelectedItem();
 
             var content = new TableLayoutPanel
             {
@@ -118,7 +108,7 @@ namespace CmdsManager.Presentation.Forms
 
             var palette = AppThemeManager.Resolve(theme);
             AppThemeManager.ApplyWindow(this, theme);
-            AppThemeManager.ApplyToolStrip(_pickerDropDown, palette);
+            _pickerDropDown.ApplyPalette(palette);
             _picker.ApplyPalette(palette);
             AppThemeManager.ApplyWindowCorners(this);
         }
@@ -128,6 +118,7 @@ namespace CmdsManager.Presentation.Forms
         internal FluentTextBox NameEditor => _name;
         internal Control IconSelector => _iconButton;
         internal FolderPickerControl Picker => _picker;
+        internal ToolStripDropDown PickerDropDown => _pickerDropDown;
 
         protected override void OnFormClosed(FormClosedEventArgs args)
         {
@@ -248,6 +239,84 @@ namespace CmdsManager.Presentation.Forms
                 FolderIconRenderer.Draw(args.Graphics,
                     new Rectangle((Width - 21) / 2, (Height - 21) / 2, 21, 21), Icon,
                     FolderIconRenderer.ParseColor(IconColor, _palette.Accent));
+            }
+        }
+
+        private sealed class FolderPickerDropDown : ToolStripDropDown
+        {
+            private const float ClipRadius = 10f;
+            private const float BorderRadius = 9f;
+
+            internal FolderPickerDropDown()
+            {
+                AutoClose = true;
+                AutoSize = true;
+                DropShadowEnabled = true;
+                GripStyle = ToolStripGripStyle.Hidden;
+                Margin = Padding.Empty;
+                Padding = new Padding(2);
+            }
+
+            internal void ApplyPalette(AppThemePalette palette)
+            {
+                var resolved = palette ?? AppThemePalette.Light();
+                BackColor = resolved.Surface;
+                ForeColor = resolved.Text;
+                Renderer = new FolderPickerRenderer(resolved);
+                foreach (ToolStripItem item in Items)
+                {
+                    item.ForeColor = resolved.Text;
+                    var host = item as ToolStripControlHost;
+                    if (host?.Control != null)
+                    {
+                        host.BackColor = resolved.Surface;
+                        host.Control.ForeColor = resolved.Text;
+                    }
+                    else item.BackColor = Color.Transparent;
+                }
+                Invalidate(true);
+            }
+
+            protected override void OnOpened(EventArgs args)
+            {
+                ApplyAlignedRegion();
+                base.OnOpened(args);
+            }
+
+            protected override void OnSizeChanged(EventArgs args)
+            {
+                base.OnSizeChanged(args);
+                ApplyAlignedRegion();
+            }
+
+            private void ApplyAlignedRegion()
+            {
+                FluentGeometry.ApplyRoundedRegion(this, ClipRadius);
+            }
+
+            private sealed class FolderPickerRenderer : ToolStripRenderer
+            {
+                private readonly AppThemePalette _palette;
+
+                internal FolderPickerRenderer(AppThemePalette palette)
+                {
+                    _palette = palette ?? AppThemePalette.Light();
+                }
+
+                protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs args)
+                {
+                    args.Graphics.Clear(_palette.Surface);
+                }
+
+                protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs args)
+                {
+                    args.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                    args.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                    var bounds = FluentGeometry.SymmetricControlBounds(args.ToolStrip.ClientSize);
+                    using (var path = FluentGeometry.RoundedRectangle(bounds, BorderRadius))
+                    using (var pen = new Pen(_palette.Border, 1f))
+                        args.Graphics.DrawPath(pen, path);
+                }
             }
         }
 

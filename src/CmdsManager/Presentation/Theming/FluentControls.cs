@@ -831,7 +831,7 @@ namespace CmdsManager.Presentation.Theming
 
             _valueControl = new NumericUpDown
             {
-                AutoSize = true,
+                AutoSize = false,
                 BorderStyle = BorderStyle.None,
                 Tag = AppThemeManager.PreserveColorsTag,
                 TextAlign = HorizontalAlignment.Right
@@ -914,8 +914,9 @@ namespace CmdsManager.Presentation.Theming
         {
             if (_valueControl == null) return;
             var editorHeight = _valueControl.PreferredHeight;
-            _valueControl.SetBounds(2, Math.Max(0, (Height - editorHeight) / 2),
-                Math.Max(1, Width - 4), editorHeight);
+            var horizontalInset = Width >= 5 ? 2 : 0;
+            _valueControl.SetBounds(horizontalInset, Math.Max(0, (Height - editorHeight) / 2),
+                Math.Max(1, Width - horizontalInset * 2), editorHeight);
         }
 
         private void TrackHover(Control control)

@@ -193,6 +193,8 @@ The history below is derived from the Git commits of the application.
   normal table alignment and typography for script and folder names;
 - replaced the same conflicting borders in drop-downs, numeric steppers, and
   hotkey capture fields with one antialiased symmetric contour;
+- aligned the folder color/icon popup clip with its single rounded border and
+  kept compact numeric stepper buttons, including Order, inside their fields;
 - made folder Start, Stop, and Restart act on every descendant script and show
   an aggregate execution state;
 - added persistent folder expansion, parent and ordering fields to INI schema
@@ -875,6 +877,9 @@ https://github.com/iMiKED/cmds-manager?tab=readme-ov-file#support-the-project
 - такой же конфликт абрисов устранён у выпадающих списков, числовых полей с
   кнопками изменения значения и полей ввода хоткеев: у них остался один
   сглаженный симметричный контур;
+- область обрезки всплывающего окна выбора цвета и иконки папки совмещена с
+  единственной скруглённой рамкой, а кнопки компактных числовых полей, включая
+  «Порядок», удерживаются внутри своих полей;
 - команды запуска, остановки и перезапуска папки действуют на все вложенные
   скрипты, а строка папки показывает их суммарное состояние;
 - в схему INI 13 добавлены родитель, порядок и состояние раскрытия с

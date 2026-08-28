@@ -982,6 +982,11 @@ namespace CmdsManager.Tests
                     Assert(folder.Picker.BackColor.GetBrightness() < 0.3f &&
                         folder.Picker.Controls.OfType<Button>().All(control => control.GetType().Name == "FluentButton"),
                         "the popup picker and its Done action follow the dark Fluent palette");
+                    Equal(new Padding(2), folder.PickerDropDown.Padding,
+                        "folder picker popup keeps its content clear of the rounded frame");
+                    Assert(folder.PickerDropDown.Region != null &&
+                        folder.PickerDropDown.Renderer.GetType().Name == "FolderPickerRenderer",
+                        "folder picker popup aligns one dedicated rounded border with its outer clip");
                     using (var iconBitmap = new Bitmap(24, 24))
                     using (var iconGraphics = Graphics.FromImage(iconBitmap))
                     {
@@ -1251,6 +1256,14 @@ namespace CmdsManager.Tests
                         fluentNumeric.All(control => control.Width <= 65 && control.Height >= 28) &&
                         fluentNumeric.Select(control => control.Parent).Distinct().Count() == 1,
                         "order, delay, and timeout fields share one compact row");
+                    var orderNumeric = numeric.Single(control => control.Maximum == 100000);
+                    var orderButtons = orderNumeric.Controls.Cast<Control>().Single(control =>
+                        control.GetType().Name.IndexOf("UpDownButtons", StringComparison.OrdinalIgnoreCase) >= 0);
+                    Assert(numeric.All(control => !control.AutoSize &&
+                            control.Parent.ClientRectangle.Contains(control.Bounds)) &&
+                        orderNumeric.ClientRectangle.Contains(orderButtons.Bounds) &&
+                        orderNumeric.Parent.ClientSize.Width - orderNumeric.Right >= 2,
+                        "compact numeric editors and the Order stepper buttons stay inside the rounded field");
                     Assert(!AllControls(script).OfType<TabControl>().Any(), "launch settings are on the same page instead of a second tab");
                     var encodingLabel = AllControls(script).OfType<Label>().First(control => control.Text == text["Script.Encoding"]);
                     var editorTable = encodingLabel.Parent as TableLayoutPanel;
