@@ -994,6 +994,22 @@ namespace CmdsManager.Tests
                     Assert(AllControls(folder).OfType<Button>().All(control => control.GetType().Name == "FluentButton") &&
                         AllControls(folder).Count(control => control.GetType().Name == "FluentTextBox") == 1,
                         "folder editor uses Fluent name and action controls");
+                    Assert(folder.NameEditor.Region == null && folder.NameEditor.BackColor.A == 0 &&
+                        folder.IconSelector.BackColor.A == 0,
+                        "folder name input uses one antialiased outer path without a second clipped Region");
+                    var nameBounds = FluentGeometry.SymmetricControlBounds(folder.NameEditor.ClientSize);
+                    Assert(Math.Abs(nameBounds.Left - (folder.NameEditor.ClientSize.Width - nameBounds.Right)) < 0.01f &&
+                        Math.Abs(nameBounds.Top - (folder.NameEditor.ClientSize.Height - nameBounds.Bottom)) < 0.01f,
+                        "folder name input has equal paint insets on all sides");
+                    var folderButtons = AllControls(folder).OfType<FluentButton>()
+                        .Concat(folder.Picker.Controls.OfType<FluentButton>()).ToArray();
+                    Assert(folderButtons.Length == 3 && folderButtons.All(control =>
+                    {
+                        var bounds = FluentGeometry.SymmetricControlBounds(control.ClientSize);
+                        return control.Region == null &&
+                            Math.Abs(bounds.Left - (control.ClientSize.Width - bounds.Right)) < 0.01f &&
+                            Math.Abs(bounds.Top - (control.ClientSize.Height - bounds.Bottom)) < 0.01f;
+                    }), "Cancel, Save, and Done buttons use symmetric unclipped rounded geometry");
                     Assert(quick.BackColor.GetBrightness() < 0.3f,
                         "dark application theme reaches the Quick Launch palette");
                     var settingsTabs = AllControls(settings).OfType<TabControl>().Single(control =>

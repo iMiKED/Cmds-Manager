@@ -188,8 +188,9 @@ The history below is derived from the Git commits of the application.
 - removed the decorative file glyph beside script names and made drag feedback
   double-buffered with repainting limited to the changed insertion line;
 - matched the folder glyph to the reference, removed the redundant square focus
-  outline, unified the integrated name-field border, and restored normal table
-  alignment and typography for script and folder names;
+  outline, replaced the conflicting clipped and antialiased borders with one
+  symmetric name-field contour, normalized dialog-button corners, and restored
+  normal table alignment and typography for script and folder names;
 - made folder Start, Stop, and Restart act on every descendant script and show
   an aggregate execution state;
 - added persistent folder expansion, parent and ordering fields to INI schema
@@ -866,8 +867,9 @@ https://github.com/iMiKED/cmds-manager?tab=readme-ov-file#support-the-project
 - убрана декоративная иконка файла возле имени скрипта; таблица получила двойную
   буферизацию, а при drag-and-drop перерисовывается только изменённая линия;
 - иконка папки приведена к референсу, лишний квадратный абрис фокуса удалён,
-  оформление встроенного поля имени унифицировано, а имена папок и скриптов
-  снова используют обычный шрифт и выравнивание таблицы;
+  конфликтующие обрезанный и сглаженный абрисы заменены одним симметричным
+  контуром поля имени, скругления диалоговых кнопок выровнены, а имена папок и
+  скриптов снова используют обычный шрифт и выравнивание таблицы;
 - команды запуска, остановки и перезапуска папки действуют на все вложенные
   скрипты, а строка папки показывает их суммарное состояние;
 - в схему INI 13 добавлены родитель, порядок и состояние раскрытия с

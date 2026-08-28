@@ -147,7 +147,7 @@ namespace CmdsManager.Presentation.Forms
 
         private void LayoutIconButton()
         {
-            _iconButton.SetBounds(2, 2, 40, Math.Max(1, _name.Height - 4));
+            _iconButton.SetBounds(2, 2, 39, Math.Max(1, _name.Height - 4));
         }
 
         private void ShowIconPicker(object sender, EventArgs args)
@@ -198,14 +198,15 @@ namespace CmdsManager.Presentation.Forms
         private sealed class FolderIconButton : Control, IFluentThemedControl
         {
             private AppThemePalette _palette = AppThemePalette.Light();
-            private bool _hot;
 
             internal FolderIconButton()
             {
                 Cursor = Cursors.Hand;
                 TabStop = true;
                 SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
-                    ControlStyles.ResizeRedraw | ControlStyles.UserPaint | ControlStyles.Selectable, true);
+                    ControlStyles.ResizeRedraw | ControlStyles.UserPaint | ControlStyles.Selectable |
+                    ControlStyles.SupportsTransparentBackColor, true);
+                BackColor = Color.Transparent;
             }
 
             internal FolderIconKind Icon { get; set; }
@@ -214,34 +215,20 @@ namespace CmdsManager.Presentation.Forms
             public void ApplyPalette(AppThemePalette palette)
             {
                 _palette = palette ?? AppThemePalette.Light();
-                BackColor = _palette.Input;
-                Invalidate();
-            }
-
-            protected override void OnMouseEnter(EventArgs args)
-            {
-                base.OnMouseEnter(args);
-                _hot = true;
-                Invalidate();
-            }
-
-            protected override void OnMouseLeave(EventArgs args)
-            {
-                base.OnMouseLeave(args);
-                _hot = false;
+                BackColor = Color.Transparent;
                 Invalidate();
             }
 
             protected override void OnGotFocus(EventArgs args)
             {
                 base.OnGotFocus(args);
-                Invalidate();
+                Parent?.Invalidate();
             }
 
             protected override void OnLostFocus(EventArgs args)
             {
                 base.OnLostFocus(args);
-                Invalidate();
+                Parent?.Invalidate();
             }
 
             protected override void OnKeyDown(KeyEventArgs args)
@@ -257,32 +244,10 @@ namespace CmdsManager.Presentation.Forms
 
             protected override void OnPaint(PaintEventArgs args)
             {
-                args.Graphics.Clear(_palette.Input);
                 args.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                using (var background = LeadingBackgroundPath(ClientRectangle, 4f))
-                using (var brush = new SolidBrush(_hot || Focused ? _palette.Hover : _palette.SurfaceAlternate))
-                    args.Graphics.FillPath(brush, background);
-                using (var divider = new Pen(_palette.Border))
-                    args.Graphics.DrawLine(divider, Width - 1, 3, Width - 1, Height - 4);
                 FolderIconRenderer.Draw(args.Graphics,
                     new Rectangle((Width - 21) / 2, (Height - 21) / 2, 21, 21), Icon,
                     FolderIconRenderer.ParseColor(IconColor, _palette.Accent));
-            }
-
-            private static GraphicsPath LeadingBackgroundPath(Rectangle bounds, float radius)
-            {
-                var path = new GraphicsPath();
-                var right = Math.Max(bounds.Left + radius, bounds.Right - 1f);
-                var bottom = Math.Max(bounds.Top + radius, bounds.Bottom - 1f);
-                var diameter = radius * 2f;
-                path.AddLine(bounds.Left + radius, bounds.Top, right, bounds.Top);
-                path.AddLine(right, bounds.Top, right, bottom);
-                path.AddLine(right, bottom, bounds.Left + radius, bottom);
-                path.AddArc(bounds.Left, bottom - diameter, diameter, diameter, 90f, 90f);
-                path.AddLine(bounds.Left, bottom - radius, bounds.Left, bounds.Top + radius);
-                path.AddArc(bounds.Left, bounds.Top, diameter, diameter, 180f, 90f);
-                path.CloseFigure();
-                return path;
             }
         }
 
