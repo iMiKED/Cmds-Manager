@@ -1,4 +1,4 @@
-CMDS MANAGER 1.1.6
+CMDS MANAGER 1.2.0
 ==================
 
 Website: https://github.com/iMiKED/cmds-manager
@@ -54,6 +54,11 @@ unless the selected folder allows the application to update its INI and logs.
 -----------
 
 - Add, edit, and remove script entries without deleting the script files;
+- organize scripts in nested folders or keep them at the top level;
+- create, rename, recolor, and choose an icon for each folder;
+- drag scripts and folders between levels or reorder them using the insertion
+  line; hover over a closed folder to expand it before dropping at a position;
+- start or stop a folder to start or stop every enabled descendant script;
 - open script files in a configurable external editor;
 - start one script, all enabled scripts, or selected scripts automatically;
 - configure application auto-start for the current Windows user;
@@ -172,6 +177,19 @@ https://github.com/iMiKED/cmds-manager?tab=readme-ov-file#support-the-project
 ------------------
 
 The history below is derived from the Git commits of the application.
+
+1.2.0 - 29.08.2026
+- Added nested folders while retaining the existing Fluent table columns;
+- added a compact project-style folder editor with ten vector icons and ten
+  icon colors for both light and dark themes;
+- added shared drag-and-drop ordering for folders and scripts, root-level
+  extraction, a precise insertion line, and delayed folder expansion on hover;
+- made folder Start, Stop, and Restart act on every descendant script and show
+  an aggregate execution state;
+- added persistent folder expansion, parent and ordering fields to INI schema
+  13, including automatic migration of existing unfiled scripts;
+- made folder deletion non-destructive: direct children move one level up and
+  script files remain untouched.
 
 1.1.6 - 20.08.2026
 - Positioned Quick Launch before its first visible frame so it no longer jumps
@@ -301,9 +319,9 @@ variables such as %SystemRoot% are expanded.
 [Application]
 
 ConfigVersion
-  INI schema version maintained by Cmds Manager. Current value: 12. Do not
-  lower it manually. Configurations from versions 1 through 11 are migrated to
-  12.
+  INI schema version maintained by Cmds Manager. Current value: 13. Do not
+  lower it manually. Configurations from versions 1 through 12 are migrated to
+  13.
 
 Theme
   Application shell theme: System, Light, or Dark. Default: System.
@@ -571,6 +589,31 @@ Missing built-in keys are restored automatically without overwriting customized
 values. Fixed author, license, website, donation, and payment URLs are not read
 from these sections.
 
+[Folder:<GUID>]
+
+Each folder has its own section whose suffix is a unique non-empty GUID.
+Folders and scripts use the same SortOrder sequence within their parent.
+
+Name
+  Required display name.
+
+ParentFolderId
+  GUID of the parent folder. Empty places the folder at the top level.
+
+SortOrder
+  Signed 32-bit display order shared with scripts in the same parent. Cmds
+  Manager normalizes values after a move.
+
+Icon
+  Folder, Terminal, Code, Lightning, Rocket, Gear, Database, Server, Globe, or
+  Star. Default: Folder.
+
+IconColor
+  Folder icon color in #RRGGBB format. Default: #4F46E5.
+
+Expanded
+  true keeps the folder expanded in the main tree table. Default: true.
+
 [Script:<GUID>]
 
 Each script entry has its own section whose suffix is a unique non-empty GUID.
@@ -583,6 +626,12 @@ Enabled
 
 Path
   Required .cmd, .bat, .ps1, or .vbs file path.
+
+FolderId
+  GUID of the containing folder. Empty keeps the script at the top level.
+
+SortOrder
+  Signed 32-bit display order shared with folders in the same parent.
 
 Interpreter
   Auto, Cmd, WindowsPowerShell, PowerShell7, CScript, or WScript.
@@ -671,6 +720,11 @@ Files, если выбранная папка не позволяет обнов
 --------------
 
 - Добавление, изменение и удаление записей без удаления файлов скриптов;
+- организация скриптов во вложенных папках либо на верхнем уровне;
+- создание и переименование папок, выбор их векторной иконки и цвета;
+- перетаскивание папок и скриптов между уровнями и изменение порядка по линии
+  вставки; задержка над закрытой папкой раскрывает её перед точным drop;
+- запуск или остановка папки запускает либо останавливает все вложенные скрипты;
 - открытие скриптов в настраиваемом внешнем редакторе;
 - запуск одного скрипта, всех активных скриптов или автоматический запуск
   отмеченных скриптов;
@@ -792,6 +846,20 @@ https://github.com/iMiKED/cmds-manager?tab=readme-ov-file#support-the-project
 -----------------
 
 История составлена по Git-коммитам приложения.
+
+1.2.0 — 29.08.2026
+- Добавлены вложенные папки с сохранением всех столбцов Fluent-таблицы;
+- добавлен компактный редактор папки в стиле организации проектов: десять
+  векторных иконок и десять цветов для светлой и тёмной темы;
+- добавлены общий порядок папок и скриптов, drag-and-drop между уровнями,
+  извлечение на верхний уровень, точная линия вставки и раскрытие папки при
+  задержке над ней;
+- команды запуска, остановки и перезапуска папки действуют на все вложенные
+  скрипты, а строка папки показывает их суммарное состояние;
+- в схему INI 13 добавлены родитель, порядок и состояние раскрытия с
+  автоматической миграцией существующих скриптов без папки;
+- удаление папки не уничтожает содержимое: прямые дочерние элементы поднимаются
+  на один уровень, файлы скриптов не удаляются.
 
 1.1.6 — 20.08.2026
 - Позиция быстрого запуска теперь вычисляется до первого видимого кадра, поэтому
@@ -924,8 +992,8 @@ INI хранится рядом с CmdsManager.exe в UTF-8. Логически�
 [Application]
 
 ConfigVersion
-  Версия схемы INI, которой управляет Cmds Manager. Текущее значение: 12.
-  Не уменьшайте её вручную. Конфигурации версий 1–11 мигрируют в версию 12.
+  Версия схемы INI, которой управляет Cmds Manager. Текущее значение: 13.
+  Не уменьшайте её вручную. Конфигурации версий 1–12 мигрируют в версию 13.
 
 Theme
   Тема оболочки: System, Light или Dark. По умолчанию: System.
@@ -1205,6 +1273,32 @@ Language
 значений. Фиксированные URL автора, лицензии, сайта, донатов и платёжных способов
 из этих секций не читаются.
 
+[Folder:<GUID>]
+
+Каждая папка находится в собственной секции с уникальным непустым GUID.
+Папки и скрипты используют общий SortOrder внутри одного родителя.
+
+Name
+  Обязательное отображаемое название.
+
+ParentFolderId
+  GUID родительской папки. Пустое значение размещает папку на верхнем уровне.
+
+SortOrder
+  Знаковый 32-битный порядок, общий со скриптами в том же родителе. После
+  перемещения Cmds Manager нормализует значения.
+
+Icon
+  Folder, Terminal, Code, Lightning, Rocket, Gear, Database, Server, Globe или
+  Star. По умолчанию: Folder.
+
+IconColor
+  Цвет иконки в формате #RRGGBB. По умолчанию: #4F46E5.
+
+Expanded
+  true сохраняет папку раскрытой в главной древовидной таблице. По умолчанию:
+  true.
+
 [Script:<GUID>]
 
 Каждая запись находится в собственной секции, суффикс которой является
@@ -1218,6 +1312,12 @@ Enabled
 
 Path
   Обязательный путь к файлу .cmd, .bat, .ps1 или .vbs.
+
+FolderId
+  GUID содержащей папки. Пустое значение оставляет скрипт на верхнем уровне.
+
+SortOrder
+  Знаковый 32-битный порядок, общий с папками в том же родителе.
 
 Interpreter
   Auto, Cmd, WindowsPowerShell, PowerShell7, CScript или WScript.

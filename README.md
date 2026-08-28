@@ -19,7 +19,7 @@ maintained by [iMiKED from 4PDA](https://4pda.to/forum/index.php?showuser=101794
 Cmds Manager is a lightweight Windows tray application for organizing, running,
 monitoring, and stopping local automation scripts. It keeps a searchable script
 catalog in a portable INI file and presents captured output in a modern tabbed
-console workspace. The current source version is 1.1.6.
+console workspace. The current source version is 1.2.0.
 
 The application is built with C# and Windows Forms for .NET Framework 4.8. The
 release contains one production executable and does not bundle PowerShell, .NET,
@@ -43,6 +43,13 @@ If you like Cmds Manager or it saves you time, you can support the author:
 ### Script management
 
 - Add, edit, remove, enable, and disable script entries
+- Organize scripts and nested folders in one tree table while keeping every
+  runtime column available
+- Keep scripts at the top level or drag them into, between, and out of folders
+- Reorder folders and scripts with a precise insertion line; pause over a
+  closed folder to expand it before dropping at an exact position
+- Give every folder one of ten vector icons and one of ten theme-aware colors
+- Start, stop, or restart a folder to apply the action to all descendant scripts
 - Start or stop one script, all selected scripts, or the complete managed set
 - Open script files in an external editor without executing them accidentally
 - Configure interpreter, arguments, working directory, window mode, output
@@ -165,7 +172,8 @@ paths are resolved from this directory and Windows environment variables such as
 | `[PowerShell]` | Optional path to `pwsh.exe` |
 | `[Localization]` | Active language |
 | `[Strings.en]`, `[Strings.ru]` | Editable interface strings |
-| `[Script:<GUID>]` | One saved script and its complete launch profile |
+| `[Folder:<GUID>]` | Nested folder parent, shared order, icon, color, and expansion state |
+| `[Script:<GUID>]` | One saved script, optional folder, shared order, and complete launch profile |
 
 The complete English and Russian user guide, version history, and reference for
 every INI setting are available in [Readme.txt](Readme.txt).
@@ -205,7 +213,7 @@ To compile and package without running tests:
 For release validation, the expected tag can be supplied explicitly:
 
 ```powershell
-.\build.ps1 -ExpectedVersion 1.1.6
+.\build.ps1 -ExpectedVersion 1.2.0
 ```
 
 The command fails when the tag and `AssemblyInformationalVersion` differ.

@@ -33,7 +33,7 @@ namespace CmdsManager.Infrastructure.Configuration
 
     public sealed class ConfigurationStore
     {
-        private const int CurrentVersion = 12;
+        private const int CurrentVersion = 13;
         private readonly object _sync = new object();
         private readonly UTF8Encoding _utf8 = new UTF8Encoding(false, true);
         private byte[] _loadedHash;
@@ -188,6 +188,34 @@ namespace CmdsManager.Infrastructure.Configuration
             result.Localization = ReadLocalization(ini);
 
             var identifiers = new HashSet<Guid>();
+            var folderOrder = 0;
+            foreach (var section in ini.SectionNames.Where(name => name.StartsWith("Folder:", StringComparison.OrdinalIgnoreCase)))
+            {
+                Guid id;
+                if (!Guid.TryParse(section.Substring("Folder:".Length), out id) || id == Guid.Empty)
+                {
+                    throw new ConfigurationValidationException(section, "", "section suffix must be a non-empty GUID");
+                }
+
+                if (!identifiers.Add(id))
+                {
+                    throw new ConfigurationValidationException(section, "", "duplicate folder or script identifier");
+                }
+
+                result.Folders.Add(new ScriptFolderDefinition
+                {
+                    Id = id,
+                    Name = Required(ini, section, "Name"),
+                    ParentFolderId = ReadOptionalGuid(ini, section, "ParentFolderId"),
+                    SortOrder = ReadInt(ini, section, "SortOrder", folderOrder, int.MinValue, int.MaxValue),
+                    Icon = ReadEnum(ini, section, "Icon", FolderIconKind.Folder),
+                    IconColor = ini.Get(section, "IconColor", "#4F46E5").Trim(),
+                    IsExpanded = ReadBool(ini, section, "Expanded", true)
+                });
+                folderOrder += 10;
+            }
+
+            var scriptOrder = 0;
             foreach (var section in ini.SectionNames.Where(name => name.StartsWith("Script:", StringComparison.OrdinalIgnoreCase)))
             {
                 Guid id;
@@ -207,10 +235,13 @@ namespace CmdsManager.Infrastructure.Configuration
                     Name = Required(ini, section, "Name"),
                     Enabled = ReadBool(ini, section, "Enabled", true),
                     Path = Required(ini, section, "Path"),
+                    FolderId = ReadOptionalGuid(ini, section, "FolderId"),
+                    SortOrder = ReadInt(ini, section, "SortOrder", scriptOrder, int.MinValue, int.MaxValue),
                     Launch = ReadLaunchProfile(ini, section, result.Defaults, true)
                 };
 
                 result.Scripts.Add(script);
+                scriptOrder += 10;
             }
 
             return result;
@@ -316,12 +347,29 @@ namespace CmdsManager.Infrastructure.Configuration
                 }
             }
 
-            foreach (var script in configuration.Scripts.OrderBy(item => item.Launch.AutoStartOrder).ThenBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase))
+            foreach (var folder in configuration.Folders.OrderBy(item => item.ParentFolderId.HasValue)
+                .ThenBy(item => item.ParentFolderId).ThenBy(item => item.SortOrder)
+                .ThenBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase))
+            {
+                var section = "Folder:" + folder.Id.ToString("D");
+                ini.Set(section, "Name", folder.Name);
+                ini.Set(section, "ParentFolderId", folder.ParentFolderId?.ToString("D") ?? string.Empty);
+                ini.Set(section, "SortOrder", folder.SortOrder);
+                ini.Set(section, "Icon", folder.Icon);
+                ini.Set(section, "IconColor", folder.IconColor ?? "#4F46E5");
+                ini.Set(section, "Expanded", Bool(folder.IsExpanded));
+            }
+
+            foreach (var script in configuration.Scripts.OrderBy(item => item.FolderId.HasValue)
+                .ThenBy(item => item.FolderId).ThenBy(item => item.SortOrder)
+                .ThenBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase))
             {
                 var section = "Script:" + script.Id.ToString("D");
                 ini.Set(section, "Name", script.Name);
                 ini.Set(section, "Enabled", Bool(script.Enabled));
                 ini.Set(section, "Path", script.Path);
+                ini.Set(section, "FolderId", script.FolderId?.ToString("D") ?? string.Empty);
+                ini.Set(section, "SortOrder", script.SortOrder);
                 WriteLaunchProfile(ini, section, script.Launch, true);
             }
 
@@ -353,7 +401,8 @@ namespace CmdsManager.Infrastructure.Configuration
         private static void ValidateConfiguration(AppConfiguration configuration)
         {
             if (configuration.Application == null || configuration.Application.Hotkeys == null ||
-                configuration.Defaults == null || configuration.Localization == null || configuration.Scripts == null)
+                configuration.Defaults == null || configuration.Localization == null || configuration.Folders == null ||
+                configuration.Scripts == null)
             {
                 throw new ConfigurationValidationException("Application", "", "configuration object is incomplete");
             }
@@ -442,6 +491,20 @@ namespace CmdsManager.Infrastructure.Configuration
                 {
                     throw new ConfigurationValidationException("Script:" + script.Id.ToString("D"), "", "duplicate identifier");
                 }
+            }
+
+            foreach (var folder in configuration.Folders)
+            {
+                ValidateColor(folder.IconColor, "Folder:" + folder.Id.ToString("D") + ".IconColor");
+            }
+
+            try
+            {
+                ScriptHierarchy.Validate(configuration);
+            }
+            catch (Exception exception)
+            {
+                throw new ConfigurationValidationException("Folders", "", exception.Message);
             }
         }
 
@@ -623,6 +686,22 @@ namespace CmdsManager.Infrastructure.Configuration
                 return true;
             }
 
+            foreach (var section in ini.SectionNames.Where(name => name.StartsWith("Script:", StringComparison.OrdinalIgnoreCase)))
+            {
+                string ignored;
+                if (!ini.TryGet(section, "FolderId", out ignored) || !ini.TryGet(section, "SortOrder", out ignored))
+                    return true;
+            }
+
+            foreach (var section in ini.SectionNames.Where(name => name.StartsWith("Folder:", StringComparison.OrdinalIgnoreCase)))
+            {
+                string ignored;
+                if (!ini.TryGet(section, "ParentFolderId", out ignored) || !ini.TryGet(section, "SortOrder", out ignored) ||
+                    !ini.TryGet(section, "Icon", out ignored) || !ini.TryGet(section, "IconColor", out ignored) ||
+                    !ini.TryGet(section, "Expanded", out ignored))
+                    return true;
+            }
+
             var defaults = LocalizationDefaults.Create();
             foreach (var language in defaults.Languages)
             {
@@ -702,6 +781,17 @@ namespace CmdsManager.Infrastructure.Configuration
             {
                 ReplaceBrandDefaults(configuration.Localization);
             }
+            ScriptHierarchy.NormalizeAll(configuration);
+        }
+
+        private static Guid? ReadOptionalGuid(IniDocument ini, string section, string key)
+        {
+            var value = ini.Get(section, key, string.Empty).Trim();
+            if (value.Length == 0) return null;
+            Guid identifier;
+            if (!Guid.TryParse(value, out identifier) || identifier == Guid.Empty)
+                throw new ConfigurationValidationException(section, key, "value must be empty or a non-empty GUID");
+            return identifier;
         }
 
         private static void ReplaceBrandDefaults(LocalizationSettings localization)

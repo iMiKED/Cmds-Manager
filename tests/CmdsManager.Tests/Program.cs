@@ -7,6 +7,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using CmdsManager.Application;
 using CmdsManager.Domain;
@@ -29,6 +30,7 @@ namespace CmdsManager.Tests
         {
             Run("INI parser", TestIniParser);
             Run("Configuration round-trip and conflict", TestConfigurationStore);
+            Run("Nested script folders", TestScriptHierarchy);
             Run("Configurable global and local hotkeys", TestShowAppHotkey);
             Run("Bilingual release user guide", TestReleaseUserGuide);
             Run("Script validation and command line", TestCommandBuilder);
@@ -36,6 +38,7 @@ namespace CmdsManager.Tests
             Run("Cyrillic output encodings", TestCyrillicOutput);
             Run("Parallel launch sessions", TestParallelLaunchSessions);
             Run("Compact localized dialogs", TestCompactLocalizedDialogs);
+            Run("Fluent folder tree and drag targets", TestFolderTreeUi);
             Run("Batched console output", TestBatchedConsoleOutput);
             Run("Console search and scroll lock", TestConsoleSearchAndScrollLock);
             Run("Console recording and limits", TestConsoleRecording);
@@ -192,7 +195,7 @@ namespace CmdsManager.Tests
                 var legacyPath = Path.Combine(directory, "Legacy.ini");
                 File.WriteAllText(legacyPath, "[Application]\r\nConfigVersion=1\r\n", new UTF8Encoding(false));
                 var legacy = new ConfigurationStore(legacyPath).LoadOrCreate();
-                Equal(12, legacy.Application.ConfigVersion, "legacy configuration version is upgraded");
+                Equal(13, legacy.Application.ConfigVersion, "legacy configuration version is upgraded");
                 Assert(File.ReadAllText(legacyPath, Encoding.UTF8).Contains("[Strings.ru]"), "legacy configuration receives localization strings");
 
                 var version2Path = Path.Combine(directory, "Version2.ini");
@@ -202,7 +205,7 @@ namespace CmdsManager.Tests
                     "[Strings.ru]\r\nScript.Encoding.Auto=Авто (OEM Windows)\r\n",
                     new UTF8Encoding(false));
                 var version2 = new ConfigurationStore(version2Path).LoadOrCreate();
-                Equal(12, version2.Application.ConfigVersion, "version 2 configuration is upgraded");
+                Equal(13, version2.Application.ConfigVersion, "version 2 configuration is upgraded");
                 Equal("Auto (UTF-8/Windows-1251/OEM)", version2.Localization.Languages["en"]["Script.Encoding.Auto"],
                     "old default English Auto label is migrated");
                 Equal("Авто (UTF-8/Windows-1251/OEM)", version2.Localization.Languages["ru"]["Script.Encoding.Auto"],
@@ -216,7 +219,7 @@ namespace CmdsManager.Tests
                     "[Strings.ru]\r\nSettings.Title=Настройки CmdsManager\r\n",
                     new UTF8Encoding(false));
                 var version5 = new ConfigurationStore(version5Path).LoadOrCreate();
-                Equal(12, version5.Application.ConfigVersion, "version 5 configuration is upgraded");
+                Equal(13, version5.Application.ConfigVersion, "version 5 configuration is upgraded");
                 Equal("Cmds Manager settings", version5.Localization.Languages["en"]["Settings.Title"],
                     "old default English brand is migrated");
                 Equal("Настройки Cmds Manager", version5.Localization.Languages["ru"]["Settings.Title"],
@@ -225,7 +228,7 @@ namespace CmdsManager.Tests
                 var version6Path = Path.Combine(directory, "Version6.ini");
                 File.WriteAllText(version6Path, "[Application]\r\nConfigVersion=6\r\n", new UTF8Encoding(false));
                 var version6 = new ConfigurationStore(version6Path).LoadOrCreate();
-                Equal(12, version6.Application.ConfigVersion, "version 6 configuration is upgraded");
+                Equal(13, version6.Application.ConfigVersion, "version 6 configuration is upgraded");
                 Equal(ApplicationTheme.System, version6.Application.Theme,
                     "existing installations default to the system application theme");
                 Assert(File.ReadAllText(version6Path, Encoding.UTF8).Contains("Theme=System"),
@@ -241,7 +244,7 @@ namespace CmdsManager.Tests
                     "Name=Version 7 script\r\nPath=" + scriptPath + "\r\n",
                     new UTF8Encoding(false));
                 var version7 = new ConfigurationStore(version7Path).LoadOrCreate();
-                Equal(12, version7.Application.ConfigVersion, "version 7 configuration is upgraded");
+                Equal(13, version7.Application.ConfigVersion, "version 7 configuration is upgraded");
                 Equal(false, version7.Scripts[0].Launch.WordWrap,
                     "existing scripts receive the default disabled word-wrap setting");
                 var version7Text = File.ReadAllText(version7Path, Encoding.UTF8);
@@ -258,7 +261,7 @@ namespace CmdsManager.Tests
                     "[Strings.ru]\r\nAbout.Build=Сборка: {0}\r\n",
                     new UTF8Encoding(false));
                 var version8 = new ConfigurationStore(version8Path).LoadOrCreate();
-                Equal(12, version8.Application.ConfigVersion, "version 8 configuration is upgraded");
+                Equal(13, version8.Application.ConfigVersion, "version 8 configuration is upgraded");
                 Equal(256, version8.Application.ConsoleBufferSizeKb, "version 8 receives the default console buffer");
                 Equal(false, version8.Application.ConsoleAutoRecord, "version 8 keeps automatic recording disabled");
                 Equal(50, version8.Application.ConsoleLogMaxSizeMb, "version 8 receives the default console log limit");
@@ -274,7 +277,7 @@ namespace CmdsManager.Tests
                 var version9Path = Path.Combine(directory, "Version9.ini");
                 File.WriteAllText(version9Path, "[Application]\r\nConfigVersion=9\r\n", new UTF8Encoding(false));
                 var version9 = new ConfigurationStore(version9Path).LoadOrCreate();
-                Equal(12, version9.Application.ConfigVersion, "version 9 configuration is upgraded");
+                Equal(13, version9.Application.ConfigVersion, "version 9 configuration is upgraded");
                 Equal(false, version9.Application.ShowAppHotkeyEnabled,
                     "version 9 keeps Show App Hotkey disabled by default");
                 Equal("Ctrl+Alt+M", version9.Application.ShowAppHotkey,
@@ -289,7 +292,7 @@ namespace CmdsManager.Tests
                     "[Application]\r\nConfigVersion=10\r\nShowAppHotkeyEnabled=false\r\nShowAppHotkey=\r\n",
                     new UTF8Encoding(false));
                 var version10 = new ConfigurationStore(version10Path).LoadOrCreate();
-                Equal(12, version10.Application.ConfigVersion, "version 10 configuration is upgraded");
+                Equal(13, version10.Application.ConfigVersion, "version 10 configuration is upgraded");
                 Equal(false, version10.Application.ShowAppHotkeyEnabled,
                     "version 10 keeps Show App Hotkey disabled by default");
                 Equal("Ctrl+Alt+M", version10.Application.ShowAppHotkey,
@@ -304,7 +307,7 @@ namespace CmdsManager.Tests
                     "[Strings.ru]\r\nSettings.ShowAppHotkey=Хоткей Показать приложение\r\n",
                     new UTF8Encoding(false));
                 var version11 = new ConfigurationStore(version11Path).LoadOrCreate();
-                Equal(12, version11.Application.ConfigVersion, "version 11 configuration is upgraded");
+                Equal(13, version11.Application.ConfigVersion, "version 11 configuration is upgraded");
                 Equal(true, version11.Application.Hotkeys[HotkeyAction.ShowApp].Enabled,
                     "version 11 keeps the configured Show App hotkey enabled");
                 Equal("Ctrl+Shift+M", version11.Application.Hotkeys[HotkeyAction.ShowApp].Gesture,
@@ -324,6 +327,97 @@ namespace CmdsManager.Tests
                     !version11Text.Contains("ShowAppHotkey=") &&
                     !version11Text.Contains("Settings.ShowAppHotkey="),
                     "version 11 migration removes obsolete Show App keys and labels");
+
+                var version12Path = Path.Combine(directory, "Version12.ini");
+                var version12ScriptId = Guid.NewGuid();
+                File.WriteAllText(version12Path,
+                    "[Application]\r\nConfigVersion=12\r\n" +
+                    "[Script:" + version12ScriptId.ToString("D") + "]\r\n" +
+                    "Name=Unfiled script\r\nPath=" + scriptPath + "\r\n",
+                    new UTF8Encoding(false));
+                var version12 = new ConfigurationStore(version12Path).LoadOrCreate();
+                Equal(13, version12.Application.ConfigVersion, "version 12 configuration is upgraded");
+                Equal(null, version12.Scripts[0].FolderId,
+                    "version 12 scripts remain outside folders after migration");
+                Equal(0, version12.Scripts[0].SortOrder,
+                    "version 12 scripts receive a stable display order");
+                var version12Text = File.ReadAllText(version12Path, Encoding.UTF8);
+                Assert(version12Text.Contains("FolderId=") && version12Text.Contains("SortOrder=0"),
+                    "version 12 migration persists hierarchy fields");
+            });
+        }
+
+        private static void TestScriptHierarchy()
+        {
+            WithTemporaryDirectory(directory =>
+            {
+                var store = new ConfigurationStore(Path.Combine(directory, "CmdsManager.ini"));
+                var configuration = store.LoadOrCreate();
+                var scriptPath = Path.Combine(directory, "folder-test.cmd");
+                File.WriteAllText(scriptPath, "@exit /b 0\r\n", Encoding.ASCII);
+
+                var rootFolder = new ScriptFolderDefinition
+                {
+                    Name = "Operations",
+                    Icon = FolderIconKind.Terminal,
+                    IconColor = "#2563EB",
+                    IsExpanded = false
+                };
+                var nestedFolder = new ScriptFolderDefinition
+                {
+                    Name = "Maintenance",
+                    Icon = FolderIconKind.Gear,
+                    IconColor = "#EA580C"
+                };
+                var rootScript = new ScriptDefinition { Name = "Unfiled", Path = scriptPath };
+                var deployScript = new ScriptDefinition { Name = "Deploy", Path = scriptPath };
+                var cleanupScript = new ScriptDefinition { Name = "Cleanup", Path = scriptPath };
+
+                ScriptHierarchy.AppendFolder(configuration, rootFolder, null);
+                ScriptHierarchy.AppendScript(configuration, rootScript, null);
+                ScriptHierarchy.AppendFolder(configuration, nestedFolder, rootFolder.Id);
+                ScriptHierarchy.AppendScript(configuration, deployScript, rootFolder.Id);
+                ScriptHierarchy.AppendScript(configuration, cleanupScript, nestedFolder.Id);
+
+                Equal(2, ScriptHierarchy.GetChildren(configuration, null).Count,
+                    "root can contain folders and unfiled scripts together");
+                Assert(ScriptHierarchy.GetChildren(configuration, rootFolder.Id)
+                        .Select(item => item.Kind)
+                        .SequenceEqual(new[] { HierarchyItemKind.Folder, HierarchyItemKind.Script }),
+                    "folders and scripts share one stable ordering inside a folder");
+                Assert(ScriptHierarchy.GetAllScriptsInDisplayOrder(configuration).Select(item => item.Name)
+                        .SequenceEqual(new[] { "Cleanup", "Deploy", "Unfiled" }),
+                    "nested scripts are returned in visible tree order");
+
+                ScriptHierarchy.MoveItem(configuration, HierarchyItemKey.Script(rootScript.Id), nestedFolder.Id, 0);
+                Assert(ScriptHierarchy.GetDescendantScripts(configuration, rootFolder.Id).Select(item => item.Name)
+                        .SequenceEqual(new[] { "Unfiled", "Cleanup", "Deploy" }),
+                    "dragging an unfiled script into a nested folder preserves the requested position");
+                Expect<InvalidOperationException>(() => ScriptHierarchy.MoveItem(configuration,
+                    HierarchyItemKey.Folder(rootFolder.Id), nestedFolder.Id, 0),
+                    "a folder cannot be dropped into its descendant");
+
+                ScriptHierarchy.RemoveFolderKeepingContents(configuration, nestedFolder.Id);
+                Equal(1, configuration.Folders.Count, "deleting a folder keeps its nested content");
+                Assert(configuration.Scripts.All(item => item.Id == deployScript.Id || item.FolderId == rootFolder.Id),
+                    "deleted folder scripts are promoted one level without deleting files");
+                Assert(ScriptHierarchy.GetChildren(configuration, rootFolder.Id).Select(item => item.Id)
+                        .SequenceEqual(new[] { rootScript.Id, cleanupScript.Id, deployScript.Id }),
+                    "promoted items take the deleted folder position");
+
+                store.Save(configuration);
+                var reloaded = store.Reload();
+                Equal(1, reloaded.Folders.Count, "folder configuration round-trips through INI");
+                Equal(FolderIconKind.Terminal, reloaded.Folders[0].Icon, "folder icon round-trips through INI");
+                Equal("#2563EB", reloaded.Folders[0].IconColor, "folder icon color round-trips through INI");
+                Equal(false, reloaded.Folders[0].IsExpanded, "folder expansion state round-trips through INI");
+                Assert(File.ReadAllText(store.ConfigPath, Encoding.UTF8).Contains("[Folder:" + rootFolder.Id.ToString("D") + "]"),
+                    "folders use dedicated readable INI sections");
+
+                var invalid = reloaded.Clone();
+                invalid.Folders[0].ParentFolderId = invalid.Folders[0].Id;
+                Expect<InvalidOperationException>(() => ScriptHierarchy.Validate(invalid),
+                    "folder hierarchy validation rejects cycles");
             });
         }
 
@@ -417,7 +511,7 @@ namespace CmdsManager.Tests
                 @"..\..\..\..\Readme.txt"));
             Assert(File.Exists(readmePath), "release Readme.txt exists at the repository root");
             var guide = File.ReadAllText(readmePath, Encoding.UTF8);
-            Assert(guide.StartsWith("CMDS MANAGER 1.1.6", StringComparison.Ordinal),
+            Assert(guide.StartsWith("CMDS MANAGER 1.2.0", StringComparison.Ordinal),
                 "user guide identifies the stable release");
             foreach (var heading in new[]
             {
@@ -431,7 +525,7 @@ namespace CmdsManager.Tests
 
             foreach (var version in new[]
             {
-                "1.1.6", "1.1.5", "1.1.4", "1.1.3", "1.1.2", "1.1.1", "1.1.0", "1.0.0", "0.6.6", "0.6.5", "0.6.4", "0.6.3", "0.6.2", "0.6.1", "0.6.0",
+                "1.2.0", "1.1.6", "1.1.5", "1.1.4", "1.1.3", "1.1.2", "1.1.1", "1.1.0", "1.0.0", "0.6.6", "0.6.5", "0.6.4", "0.6.3", "0.6.2", "0.6.1", "0.6.0",
                 "0.5.1", "0.5.0", "0.4.2", "0.4.1", "0.4.0", "0.3.0", "0.2.1", "0.2.0", "0.1.0-dev"
             })
             {
@@ -466,7 +560,8 @@ namespace CmdsManager.Tests
                 "ConsoleTabBackgroundColor", "ConsoleTabBackgroundOpacity", "ConsoleActiveTabBackgroundColor",
                 "ConsoleActiveTabBackgroundOpacity", "Interpreter", "Arguments", "WorkingDirectory",
                 "WindowMode", "CaptureOutput", "OutputEncoding", "WordWrap", "AllowParallelInstances",
-                "StopPolicy", "StopTimeoutSeconds", "PowerShell7Path", "Language", "Name", "Enabled", "Path",
+                "StopPolicy", "StopTimeoutSeconds", "PowerShell7Path", "Language", "Name", "ParentFolderId",
+                "SortOrder", "Icon", "IconColor", "Expanded", "Enabled", "Path", "FolderId",
                 "AutoStartWithApplication", "AutoStartOrder", "AutoStartDelaySeconds"
             })
             {
@@ -842,6 +937,7 @@ namespace CmdsManager.Tests
                 using (var about = new AboutForm(text, ApplicationTheme.Dark))
                 using (var settings = new SettingsForm(configuration.Application, configuration.PowerShell7Path, configuration.Localization, text))
                 using (var script = new ScriptEditorForm(null, configuration.Defaults, directory, text, ApplicationTheme.Dark))
+                using (var folder = new FolderEditorForm(null, null, text, ApplicationTheme.Dark))
                 using (var quick = new QuickLaunchForm(quickScripts, text, ApplicationTheme.Dark, id =>
                     new ScriptRuntimeSnapshot
                     {
@@ -853,20 +949,30 @@ namespace CmdsManager.Tests
                     var aboutHandle = about.Handle;
                     var settingsHandle = settings.Handle;
                     var scriptHandle = script.Handle;
+                    var folderHandle = folder.Handle;
                     var quickHandle = quick.Handle;
                     about.PerformLayout();
                     settings.PerformLayout();
                     script.PerformLayout();
+                    folder.PerformLayout();
                     quick.PerformLayout();
                     Assert(about.ClientSize.Width <= 580 && about.ClientSize.Height <= 300,
                         "About box remains compact with a 128 px icon");
                     Assert(settings.ClientSize.Width <= 530 && settings.ClientSize.Height <= 340, "settings dialog is narrower and compact");
-                    Assert(script.ClientSize.Width <= 570 && script.ClientSize.Height <= 475,
+                    Assert(script.ClientSize.Width <= 570 && script.ClientSize.Height <= 505,
                         "aligned script editor remains compact");
+                    Assert(folder.ClientSize.Width <= 480 && folder.ClientSize.Height <= 330,
+                        "folder editor remains a compact project-style picker");
                     Equal("About", about.Text, "English About title comes from INI strings");
                     Equal("Cmds Manager settings", settings.Text, "English settings title comes from INI strings");
-                    Assert(settings.BackColor.GetBrightness() < 0.3f && script.BackColor.GetBrightness() < 0.3f,
+                    Assert(settings.BackColor.GetBrightness() < 0.3f && script.BackColor.GetBrightness() < 0.3f &&
+                        folder.BackColor.GetBrightness() < 0.3f,
                         "dark application theme reaches compact dialogs");
+                    Equal(20, AllControls(folder).Count(control => control.GetType().Name == "FolderChoiceControl"),
+                        "folder editor offers ten icons and ten project-style colors");
+                    Assert(AllControls(folder).OfType<Button>().All(control => control.GetType().Name == "FluentButton") &&
+                        AllControls(folder).Count(control => control.GetType().Name == "FluentTextBox") == 1,
+                        "folder editor uses Fluent name and action controls");
                     Assert(quick.BackColor.GetBrightness() < 0.3f,
                         "dark application theme reaches the Quick Launch palette");
                     var settingsTabs = AllControls(settings).OfType<TabControl>().Single(control =>
@@ -1120,7 +1226,7 @@ namespace CmdsManager.Tests
                     Assert(alignedTextInputs.Select(control => AbsoluteLeft(control, script)).Distinct().Count() == 1,
                         "script text boxes share one left edge");
                     var alignedCombos = AllControls(script).OfType<ComboBox>().ToArray();
-                    Equal(4, alignedCombos.Length, "script editor exposes four launch selectors");
+                    Equal(5, alignedCombos.Length, "script editor exposes the folder and four launch selectors");
                     Assert(alignedCombos.Select(control => AbsoluteLeft(control, script)).Distinct().Count() == 1,
                         "script drop-downs share one left edge");
                     var alignedChecks = AllControls(script).OfType<CheckBox>()
@@ -1173,7 +1279,7 @@ namespace CmdsManager.Tests
                         "embedded 128 px PNG icon frame is decoded without pixel corruption");
                     var aboutTitle = AllControls(about).OfType<Label>().First(control => control.Text == "Cmds Manager");
                     var aboutVersion = AllControls(about).OfType<Label>().First(control => control.Text.StartsWith("Version ", StringComparison.Ordinal));
-                    Equal("Version 1.1.6", aboutVersion.Text, "About contains the stable release version");
+                    Equal("Version 1.2.0", aboutVersion.Text, "About contains the stable release version");
                     var aboutBuild = AllControls(about).OfType<Label>()
                         .First(control => control.Text.StartsWith("Built on: ", StringComparison.Ordinal));
                     DateTime parsedBuildTimestamp;
@@ -1258,6 +1364,142 @@ namespace CmdsManager.Tests
                     Equal("RUN test", received, "pipe command payload");
                 }
             }
+        }
+
+        private static void TestFolderTreeUi()
+        {
+            WithTemporaryDirectory(directory =>
+            {
+                var scriptPath = Path.Combine(directory, "folder-ui.ps1");
+                File.WriteAllText(scriptPath, "Start-Sleep -Seconds 20\r\n", Encoding.ASCII);
+                var store = new ConfigurationStore(Path.Combine(directory, "CmdsManager.ini"));
+                var configuration = store.LoadOrCreate();
+                configuration.Localization.Language = "en";
+                configuration.Application.Theme = ApplicationTheme.Dark;
+
+                var apps = new ScriptFolderDefinition
+                {
+                    Name = "Apps",
+                    Icon = FolderIconKind.Rocket,
+                    IconColor = "#7C3AED",
+                    IsExpanded = true
+                };
+                var node = new ScriptFolderDefinition
+                {
+                    Name = "Node",
+                    Icon = FolderIconKind.Code,
+                    IconColor = "#059669",
+                    IsExpanded = false
+                };
+                var nested = new ScriptDefinition
+                {
+                    Name = "Nested service",
+                    Path = scriptPath,
+                    Launch = new LaunchProfile
+                    {
+                        Interpreter = ScriptInterpreter.WindowsPowerShell,
+                        CaptureOutput = false,
+                        WindowMode = ScriptWindowMode.Hidden,
+                        StopPolicy = ScriptStopPolicy.Kill,
+                        StopTimeoutSeconds = 0
+                    }
+                };
+                var direct = new ScriptDefinition
+                {
+                    Name = "Direct service",
+                    Path = scriptPath,
+                    Launch = nested.Launch.Clone()
+                };
+                var loose = new ScriptDefinition
+                {
+                    Name = "Loose script",
+                    Path = scriptPath,
+                    Launch = nested.Launch.Clone()
+                };
+                ScriptHierarchy.AppendFolder(configuration, apps, null);
+                ScriptHierarchy.AppendScript(configuration, loose, null);
+                ScriptHierarchy.AppendFolder(configuration, node, apps.Id);
+                ScriptHierarchy.AppendScript(configuration, direct, apps.Id);
+                ScriptHierarchy.AppendScript(configuration, nested, node.Id);
+
+                var state = new ConfigurationState(configuration);
+                var text = new LocalizationService(state);
+                var builder = new ScriptCommandBuilder(directory);
+                using (var logger = new SimpleFileLogger(Path.Combine(directory, "logs"), 1))
+                using (var supervisor = new ProcessSupervisor(builder, logger, () => false))
+                using (var hotkey = new ShowAppHotkeyManager())
+                using (var form = new MainForm(state, store, supervisor,
+                    new WindowsScriptEditorLauncher(builder), new NoOpStartupRegistration(), hotkey, logger, text))
+                {
+                    form.Show();
+                    System.Windows.Forms.Application.DoEvents();
+                    var grid = FindControl<DataGridView>(form);
+                    Assert(grid.AllowDrop, "the Fluent hierarchy table accepts drag-and-drop moves");
+                    Assert(grid.Rows.Cast<DataGridViewRow>().Select(row => Convert.ToString(row.Cells["Name"].Value))
+                            .SequenceEqual(new[] { "Apps", "Node", "Direct service", "Loose script" }),
+                        "collapsed nested folders keep descendants hidden while preserving sibling order");
+
+                    var nodeRow = grid.Rows.Cast<DataGridViewRow>()
+                        .Single(row => Convert.ToString(row.Cells["Name"].Value) == "Node");
+                    var nameBounds = grid.GetCellDisplayRectangle(grid.Columns["Name"].Index, nodeRow.Index, false);
+                    var calculate = typeof(MainForm).GetMethod("CalculateDropIndicator",
+                        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                    var indicator = calculate.Invoke(form, new object[]
+                    {
+                        new Point(nameBounds.Left + 70, nameBounds.Top + nameBounds.Height / 2),
+                        HierarchyItemKey.Script(loose.Id)
+                    });
+                    Assert(indicator != null, "hovering the center of a folder produces a valid drop target");
+                    var indicatorType = indicator.GetType();
+                    var targetParent = (Guid?)indicatorType.GetProperty("ParentFolderId",
+                        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                        .GetValue(indicator, null);
+                    var lineY = (int)indicatorType.GetProperty("LineY",
+                        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                        .GetValue(indicator, null);
+                    Equal((Guid?)node.Id, targetParent,
+                        "the center drop target moves a script into the hovered folder");
+                    Assert(lineY >= nameBounds.Top,
+                        "the drag target exposes a precise horizontal insertion line");
+
+                    var hover = typeof(MainForm).GetMethod("HandleDragHoverExpansion",
+                        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                    hover.Invoke(form, new object[] { (Guid?)node.Id });
+                    typeof(MainForm).GetField("_dragHoverStartedUtc",
+                        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                        .SetValue(form, DateTime.UtcNow - TimeSpan.FromSeconds(1));
+                    hover.Invoke(form, new object[] { (Guid?)node.Id });
+                    Assert(state.Current.Folders.Single(folder => folder.Id == node.Id).IsExpanded,
+                        "a short drag hover expands a closed folder without dropping the item");
+                    Assert(grid.Rows.Cast<DataGridViewRow>().Any(row =>
+                            Convert.ToString(row.Cells["Name"].Value) == "Nested service"),
+                        "expanded folders immediately reveal their nested drop positions");
+
+                    var appsRow = grid.Rows.Cast<DataGridViewRow>()
+                        .Single(row => Convert.ToString(row.Cells["Name"].Value) == "Apps");
+                    grid.ClearSelection();
+                    appsRow.Selected = true;
+                    grid.CurrentCell = appsRow.Cells["Name"];
+                    typeof(MainForm).GetMethod("StartSelected",
+                        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                        .Invoke(form, null);
+                    Assert(WaitWithUi(() => supervisor.IsRunning(nested.Id) && supervisor.IsRunning(direct.Id),
+                        TimeSpan.FromSeconds(4)),
+                        "starting a folder starts every enabled descendant script");
+                    Assert(WaitWithUi(() => grid.Rows.Cast<DataGridViewRow>()
+                            .Where(row => Convert.ToString(row.Cells["Name"].Value) == "Apps")
+                            .Any(row => Convert.ToString(row.Cells["State"].Value) ==
+                                text.Get("Main.State.RunningMany", 2)), TimeSpan.FromSeconds(2)),
+                        "folder rows show an aggregate running state for descendant scripts");
+
+                    var stopTask = (Task)typeof(MainForm).GetMethod("StopSelectedAsync",
+                        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                        .Invoke(form, null);
+                    stopTask.GetAwaiter().GetResult();
+                    Assert(SpinWait.SpinUntil(() => !supervisor.HasRunningProcesses, TimeSpan.FromSeconds(4)),
+                        "stopping a folder stops every running descendant process tree");
+                }
+            });
         }
 
         private static void TestBatchedConsoleOutput()
@@ -1684,7 +1926,7 @@ namespace CmdsManager.Tests
                 {
                     var formHandle = form.Handle;
                     Assert(formHandle != IntPtr.Zero, "main form handle is created for queued UI updates");
-                    Equal("Cmds Manager 1.1.6", form.Text,
+                    Equal("Cmds Manager 1.2.0", form.Text,
                         "main window title contains the spaced product name and version");
                     var grid = FindControl<DataGridView>(form);
                     Assert(grid != null && grid.Columns.Contains("Activity"), "main grid has an activity indicator column");
@@ -1692,7 +1934,7 @@ namespace CmdsManager.Tests
                     var toolbarButtons = toolbar.Items.OfType<ToolStripButton>().ToArray();
                     var expectedToolbarButtons = new[]
                     {
-                        text["Main.Add"], text["Main.Edit"], text["Main.Delete"], text["Main.Start"],
+                        text["Main.Add"], text["Main.AddFolder"], text["Main.Edit"], text["Main.Delete"], text["Main.Start"],
                         text["Main.Stop"], text["Main.StartAll"], text["Main.StopAll"], text["Main.Reload"],
                         text["Main.Settings"], text["Main.About"], text["Main.Exit"]
                     };
@@ -1706,7 +1948,7 @@ namespace CmdsManager.Tests
                     Assert(renderButton != null, "Fluent toolbar exposes its button background renderer");
                     using (var normalPreview = new Bitmap(Math.Max(1, toolbarButtons[0].Width),
                         Math.Max(1, toolbarButtons[0].Height)))
-                    using (var primaryPreview = new Bitmap(Math.Max(1, toolbarButtons[3].Width), Math.Max(1, toolbarButtons[3].Height)))
+                    using (var primaryPreview = new Bitmap(Math.Max(1, toolbarButtons[4].Width), Math.Max(1, toolbarButtons[4].Height)))
                     {
                         var markerColor = Color.Magenta;
                         using (var graphics = Graphics.FromImage(normalPreview))
@@ -1719,7 +1961,7 @@ namespace CmdsManager.Tests
                         {
                             graphics.Clear(markerColor);
                             renderButton.Invoke(toolbar.Renderer,
-                                new object[] { new ToolStripItemRenderEventArgs(graphics, toolbarButtons[3]) });
+                                new object[] { new ToolStripItemRenderEventArgs(graphics, toolbarButtons[4]) });
                         }
                         Equal(markerColor.ToArgb(), normalPreview.GetPixel(normalPreview.Width / 2,
                             normalPreview.Height / 2).ToArgb(),
