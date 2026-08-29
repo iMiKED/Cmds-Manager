@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Windows.Forms;
@@ -13,10 +14,12 @@ namespace CmdsManager.Presentation.Forms
     public sealed class ScriptEditorForm : Form
     {
         private readonly Guid _id;
+        private readonly int _originalSortOrder;
         private readonly ScriptCommandBuilder _paths;
         private readonly LocalizationService _text;
         private readonly FluentTextBox _name = new FluentTextBox();
         private readonly FluentTextBox _path = new FluentTextBox();
+        private readonly FluentComboBox _folder = new FluentComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
         private readonly FluentCheckBox _enabled = new FluentCheckBox();
         private readonly FluentComboBox _interpreter = new FluentComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
         private readonly FluentTextBox _arguments = new FluentTextBox();
@@ -33,12 +36,18 @@ namespace CmdsManager.Presentation.Forms
         private readonly FluentNumericUpDown _stopTimeout = new FluentNumericUpDown { Minimum = 0, Maximum = 3600, Width = 58, TextAlign = HorizontalAlignment.Right };
 
         public ScriptEditorForm(ScriptDefinition source, LaunchProfile defaults, string configurationDirectory,
-            LocalizationService text, ApplicationTheme theme = ApplicationTheme.System)
+            LocalizationService text, ApplicationTheme theme = ApplicationTheme.System,
+            IEnumerable<ScriptFolderDefinition> folders = null, Guid? initialFolderId = null)
         {
             _text = text ?? throw new ArgumentNullException(nameof(text));
             _paths = new ScriptCommandBuilder(configurationDirectory);
-            var model = source?.Clone() ?? new ScriptDefinition { Launch = defaults?.Clone() ?? new LaunchProfile() };
+            var model = source?.Clone() ?? new ScriptDefinition
+            {
+                FolderId = initialFolderId,
+                Launch = defaults?.Clone() ?? new LaunchProfile()
+            };
             _id = model.Id == Guid.Empty ? Guid.NewGuid() : model.Id;
+            _originalSortOrder = model.SortOrder;
 
             Text = source == null ? _text["Script.Title.Add"] : _text["Script.Title.Edit"];
             StartPosition = FormStartPosition.CenterParent;
@@ -46,7 +55,7 @@ namespace CmdsManager.Presentation.Forms
             MaximizeBox = false;
             ShowInTaskbar = false;
             FormBorderStyle = FormBorderStyle.FixedDialog;
-            ClientSize = new Size(570, 465);
+            ClientSize = new Size(570, 497);
             Icon = ApplicationResources.Icon;
 
             _enabled.Text = _text["Script.Enabled"];
@@ -70,6 +79,8 @@ namespace CmdsManager.Presentation.Forms
 
             var content = CreateTable();
             AddRow(content, _text["Script.Name"], NameAndEnabled());
+            FillFolderItems(folders, model.FolderId);
+            AddRow(content, _text["Script.Folder"], _folder);
             AddRow(content, _text["Script.File"], WithButton(_path, _text["Common.Browse"], BrowseScript));
             AddRow(content, _text["Script.Interpreter"], _interpreter);
             AddRow(content, _text["Script.Arguments"], _arguments);
@@ -139,6 +150,8 @@ namespace CmdsManager.Presentation.Forms
                     Name = _name.Text.Trim(),
                     Enabled = _enabled.Checked,
                     Path = _path.Text.Trim(),
+                    FolderId = GetValue<Guid?>(_folder, null),
+                    SortOrder = _originalSortOrder,
                     Launch = new LaunchProfile
                     {
                         Interpreter = GetValue(_interpreter, ScriptInterpreter.Auto),
@@ -185,6 +198,28 @@ namespace CmdsManager.Presentation.Forms
                 if (dialog.ShowDialog(this) != DialogResult.OK) return;
                 _path.Text = dialog.FileName;
                 if (string.IsNullOrWhiteSpace(_name.Text)) _name.Text = Path.GetFileNameWithoutExtension(dialog.FileName);
+            }
+        }
+
+        private void FillFolderItems(IEnumerable<ScriptFolderDefinition> folders, Guid? selectedFolderId)
+        {
+            var values = (folders ?? Enumerable.Empty<ScriptFolderDefinition>()).ToArray();
+            _folder.Items.Clear();
+            _folder.Items.Add(new DisplayItem<Guid?>(null, _text["Script.NoFolder"]));
+            AppendFolderItems(values, null, 0, new HashSet<Guid>());
+            SelectValue(_folder, selectedFolderId);
+        }
+
+        private void AppendFolderItems(IEnumerable<ScriptFolderDefinition> folders, Guid? parentFolderId, int depth,
+            ISet<Guid> visited)
+        {
+            foreach (var folder in folders.Where(item => Nullable.Equals(item.ParentFolderId, parentFolderId))
+                .OrderBy(item => item.SortOrder).ThenBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase))
+            {
+                if (!visited.Add(folder.Id)) continue;
+                var prefix = depth == 0 ? string.Empty : new string(' ', depth * 3) + "↳ ";
+                _folder.Items.Add(new DisplayItem<Guid?>(folder.Id, prefix + folder.Name));
+                AppendFolderItems(folders, folder.Id, depth + 1, visited);
             }
         }
 

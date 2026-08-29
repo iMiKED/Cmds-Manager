@@ -7,6 +7,7 @@ namespace CmdsManager.Presentation.Theming
     internal enum ToolbarIcon
     {
         Add,
+        FolderAdd,
         Edit,
         Delete,
         Start,
@@ -35,6 +36,20 @@ namespace CmdsManager.Presentation.Theming
                     case ToolbarIcon.Add:
                         graphics.DrawLine(pen, 8, 3, 8, 13);
                         graphics.DrawLine(pen, 3, 8, 13, 8);
+                        break;
+                    case ToolbarIcon.FolderAdd:
+                        using (var folder = new GraphicsPath())
+                        {
+                            folder.AddLine(1.5f, 5f, 6.2f, 5f);
+                            folder.AddLine(6.2f, 5f, 7.8f, 7f);
+                            folder.AddLine(7.8f, 7f, 14.5f, 7f);
+                            folder.AddLine(14.5f, 7f, 14.5f, 13.5f);
+                            folder.AddLine(14.5f, 13.5f, 1.5f, 13.5f);
+                            folder.CloseFigure();
+                            graphics.DrawPath(pen, folder);
+                        }
+                        graphics.DrawLine(pen, 10.8f, 1.5f, 10.8f, 6f);
+                        graphics.DrawLine(pen, 8.5f, 3.75f, 13.1f, 3.75f);
                         break;
                     case ToolbarIcon.Edit:
                         graphics.DrawLine(pen, 3, 12.5f, 4.5f, 8.5f);

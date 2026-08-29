@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Drawing;
 using System.IO;
 using System.Linq;
@@ -26,7 +27,7 @@ namespace CmdsManager.Presentation.Forms
         private readonly ShowAppHotkeyManager _showAppHotkey;
         private readonly IExecutionLog _log;
         private readonly LocalizationService _text;
-        private readonly DataGridView _grid = new DataGridView();
+        private readonly DataGridView _grid = new DoubleBufferedDataGridView();
         private readonly Font _activityFont = new Font("Segoe UI Symbol", 11f, FontStyle.Bold, GraphicsUnit.Point);
         private readonly Font _gridHeaderFont = new Font("Segoe UI", 9f, FontStyle.Bold, GraphicsUnit.Point);
         private readonly ToolStripTextBox _filter = new ToolStripTextBox();
@@ -38,6 +39,7 @@ namespace CmdsManager.Presentation.Forms
         private readonly SplitContainer _mainSplit;
         private readonly System.Windows.Forms.Timer _layoutSaveTimer = new System.Windows.Forms.Timer { Interval = 600 };
         private readonly ToolStripButton _addButton;
+        private readonly ToolStripButton _addFolderButton;
         private readonly ToolStripButton _editButton;
         private readonly ToolStripButton _deleteButton;
         private readonly ToolStripButton _startButton;
@@ -51,10 +53,16 @@ namespace CmdsManager.Presentation.Forms
         private readonly ToolStripLabel _filterLabel = new ToolStripLabel();
         private readonly ToolStripMenuItem _contextStart = new ToolStripMenuItem();
         private readonly ToolStripMenuItem _contextStop = new ToolStripMenuItem();
+        private readonly ToolStripMenuItem _contextAddFolder = new ToolStripMenuItem();
         private readonly ToolStripMenuItem _contextEdit = new ToolStripMenuItem();
         private readonly ToolStripMenuItem _contextEditFile = new ToolStripMenuItem();
-        private readonly ToolStripMenuItem _contextFolder = new ToolStripMenuItem();
+        private readonly ToolStripMenuItem _contextShowInFolder = new ToolStripMenuItem();
         private readonly ToolStripMenuItem _contextDelete = new ToolStripMenuItem();
+        private Point _dragStart = Point.Empty;
+        private HierarchyItemKey _draggedItem;
+        private HierarchyDropIndicator _dropIndicator;
+        private Guid? _dragHoverFolderId;
+        private DateTime _dragHoverStartedUtc;
         private QuickLaunchForm _quickLauncher;
         private bool _refreshingGrid;
         private bool _restoringPaneLayout;
@@ -102,6 +110,7 @@ namespace CmdsManager.Presentation.Forms
                 CanOverflow = true
             };
             _addButton = Button((sender, args) => AddScript(), ToolbarIcon.Add);
+            _addFolderButton = Button((sender, args) => AddFolder(), ToolbarIcon.FolderAdd);
             _editButton = Button((sender, args) => EditSelected(), ToolbarIcon.Edit);
             _deleteButton = Button(async (sender, args) => await DeleteSelectedAsync(), ToolbarIcon.Delete, FluentToolRole.Danger);
             _startButton = Button((sender, args) => StartSelected(), ToolbarIcon.Start, FluentToolRole.Primary);
@@ -119,7 +128,7 @@ namespace CmdsManager.Presentation.Forms
             _filter.TextChanged += (sender, args) => RefreshGrid();
             _toolbar.Items.AddRange(new ToolStripItem[]
             {
-                _addButton, _editButton, _deleteButton, new ToolStripSeparator(),
+                _addButton, _addFolderButton, _editButton, _deleteButton, new ToolStripSeparator(),
                 _startButton, _stopButton, _startAllButton, _stopAllButton, new ToolStripSeparator(),
                 _reloadButton, _settingsButton, _aboutButton, new ToolStripSeparator(),
                 _filterLabel, _filter, new ToolStripSeparator(), _exitButton
@@ -144,7 +153,16 @@ namespace CmdsManager.Presentation.Forms
 
             _grid.SelectionChanged += HandleGridSelectionChanged;
             _grid.RowPostPaint += HandleGridRowPostPaint;
-            _grid.CellDoubleClick += (sender, args) => { if (args.RowIndex >= 0) EditSelected(); };
+            _grid.CellPainting += HandleGridCellPainting;
+            _grid.CellMouseClick += HandleGridCellMouseClick;
+            _grid.CellDoubleClick += HandleGridCellDoubleClick;
+            _grid.MouseDown += HandleGridMouseDown;
+            _grid.MouseMove += HandleGridMouseMove;
+            _grid.MouseUp += (sender, args) => _dragStart = Point.Empty;
+            _grid.DragOver += HandleGridDragOver;
+            _grid.DragDrop += HandleGridDragDrop;
+            _grid.DragLeave += HandleGridDragLeave;
+            _grid.Paint += HandleGridPaint;
             _mainSplit.SplitterMoved += HandleSplitterMoved;
             _mainSplit.DoubleClick += (sender, args) => ToggleConsolePaneMaximized();
             _mainSplit.SizeChanged += HandleSplitSizeChanged;
@@ -204,15 +222,7 @@ namespace CmdsManager.Presentation.Forms
 
         public void RunAllEnabled()
         {
-            var errors = new List<string>();
-            foreach (var script in Configuration.Scripts.Where(item => item.Enabled).OrderBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase))
-            {
-                try { _supervisor.Start(script, Configuration.PowerShell7Path); }
-                catch (Exception exception) { errors.Add(script.Name + ": " + exception.Message); }
-            }
-
-            if (errors.Count > 0)
-                MessageBox.Show(this, string.Join(Environment.NewLine, errors), _text["Main.RunTitle"], MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            StartScripts(ScriptHierarchy.GetAllScriptsInDisplayOrder(Configuration));
         }
 
         public void RunScript(string selector)
@@ -360,6 +370,7 @@ namespace CmdsManager.Presentation.Forms
             _grid.AllowUserToAddRows = false;
             _grid.AllowUserToDeleteRows = false;
             _grid.AllowUserToResizeRows = false;
+            _grid.AllowDrop = true;
             _grid.MultiSelect = false;
             _grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
             _grid.AutoGenerateColumns = false;
@@ -399,14 +410,17 @@ namespace CmdsManager.Presentation.Forms
             var context = new ContextMenuStrip();
             _contextStart.Click += (sender, args) => StartSelected();
             _contextStop.Click += async (sender, args) => await StopSelectedAsync();
+            _contextAddFolder.Click += (sender, args) => AddFolder();
             _contextEdit.Click += (sender, args) => EditSelected();
             _contextEditFile.Click += (sender, args) => EditSelectedFile();
-            _contextFolder.Click += (sender, args) => ShowSelectedInFolder();
+            _contextShowInFolder.Click += (sender, args) => ShowSelectedInFolder();
             _contextDelete.Click += async (sender, args) => await DeleteSelectedAsync();
+            context.Opening += HandleContextOpening;
             context.Items.AddRange(new ToolStripItem[]
             {
                 _contextStart, _contextStop, new ToolStripSeparator(),
-                _contextEdit, _contextEditFile, _contextFolder, new ToolStripSeparator(), _contextDelete
+                _contextAddFolder, _contextEdit, _contextEditFile, _contextShowInFolder,
+                new ToolStripSeparator(), _contextDelete
             });
             _grid.ContextMenuStrip = context;
         }
@@ -414,6 +428,7 @@ namespace CmdsManager.Presentation.Forms
         private void ApplyLocalization()
         {
             _addButton.Text = _text["Main.Add"];
+            _addFolderButton.Text = _text["Main.AddFolder"];
             _editButton.Text = _text["Main.Edit"];
             _deleteButton.Text = _text["Main.Delete"];
             _startButton.Text = _text["Main.Start"];
@@ -440,9 +455,10 @@ namespace CmdsManager.Presentation.Forms
             _grid.Columns["Path"].HeaderText = _text["Main.Column.Path"];
             _contextStart.Text = _text["Main.Start"];
             _contextStop.Text = _text["Main.Stop"];
+            _contextAddFolder.Text = _text["Main.Context.NewFolder"];
             _contextEdit.Text = _text["Main.Context.EditEntry"];
             _contextEditFile.Text = _text["Main.Context.EditFile"];
-            _contextFolder.Text = _text["Main.Context.ShowFolder"];
+            _contextShowInFolder.Text = _text["Main.Context.ShowFolder"];
             _contextDelete.Text = _text["Main.Context.DeleteEntry"];
             RefreshGrid();
             ApplyTheme();
@@ -450,68 +466,216 @@ namespace CmdsManager.Presentation.Forms
 
         private void RefreshGrid()
         {
-            var selectedId = SelectedScript?.Id;
+            var selectedItem = SelectedHierarchyItem;
             var filter = _filter.Text?.Trim() ?? string.Empty;
             _refreshingGrid = true;
             try
             {
                 _grid.Rows.Clear();
-                foreach (var script in Configuration.Scripts.OrderBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase))
-                {
-                    var type = Path.GetExtension(script.Path).TrimStart('.').ToUpperInvariant();
-                    if (filter.Length > 0 && script.Name.IndexOf(filter, StringComparison.CurrentCultureIgnoreCase) < 0 &&
-                        script.Path.IndexOf(filter, StringComparison.CurrentCultureIgnoreCase) < 0 && type.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0)
-                        continue;
-
-                    var runtime = _supervisor.GetSnapshot(script.Id);
-                    var rowIndex = _grid.Rows.Add(ActivityGlyph(runtime.State), script.Name, type, InterpreterText(script),
-                        script.Launch.AutoStartWithApplication ? _text["Common.Yes"] : _text["Common.No"], StateText(runtime),
-                        runtime.ProcessId?.ToString() ?? "-", runtime.StartedAt?.ToString("g") ?? "-",
-                        runtime.LastExitCode?.ToString() ?? "-", script.Path);
-                    var row = _grid.Rows[rowIndex];
-                    row.Tag = script.Id;
-                    ApplyRuntimeVisual(row, script, runtime);
-                    if (selectedId == script.Id)
-                    {
-                        row.Selected = true;
-                        _grid.CurrentCell = row.Cells["Name"];
-                    }
-                }
+                AppendHierarchyRows(null, 0, new List<Guid>(), filter, selectedItem);
             }
             finally { _refreshingGrid = false; }
             UpdateScriptPanelMinimum();
             UpdateButtons();
         }
 
+        private void AppendHierarchyRows(Guid? parentFolderId, int depth, IList<Guid> ancestors, string filter,
+            HierarchyItemKey selectedItem)
+        {
+            foreach (var item in ScriptHierarchy.GetChildren(Configuration, parentFolderId))
+            {
+                if (item.Kind == HierarchyItemKind.Folder)
+                {
+                    var folder = Configuration.Folders.FirstOrDefault(value => value.Id == item.Id);
+                    if (folder == null || (filter.Length > 0 && !FolderMatchesFilter(folder.Id, filter, new HashSet<Guid>())))
+                        continue;
+                    AddFolderRow(folder, depth, ancestors, selectedItem);
+                    if (filter.Length > 0 || folder.IsExpanded)
+                    {
+                        var childAncestors = ancestors.Concat(new[] { folder.Id }).ToList();
+                        AppendHierarchyRows(folder.Id, depth + 1, childAncestors, filter, selectedItem);
+                    }
+                }
+                else
+                {
+                    var script = Configuration.Scripts.FirstOrDefault(value => value.Id == item.Id);
+                    if (script == null || (filter.Length > 0 && !ScriptMatchesFilter(script, filter))) continue;
+                    AddScriptRow(script, depth, ancestors, selectedItem);
+                }
+            }
+        }
+
+        private void AddFolderRow(ScriptFolderDefinition folder, int depth, IList<Guid> ancestors,
+            HierarchyItemKey selectedItem)
+        {
+            var scripts = ScriptHierarchy.GetDescendantScripts(Configuration, folder.Id);
+            var runtime = AggregateFolderRuntime(folder.Id, scripts);
+            var rowIndex = _grid.Rows.Add(ActivityGlyph(runtime.State), folder.Name, _text["Main.Folder.Type"],
+                _text.Get("Main.Folder.ScriptCount", scripts.Count), "—", scripts.Count == 0 ? _text["Main.Folder.Empty"] : StateText(runtime),
+                "-", runtime.StartedAt?.ToString("g") ?? "-", "-", FolderPath(folder));
+            var row = _grid.Rows[rowIndex];
+            row.Tag = new FolderGridRowTag(folder.Id);
+            row.Cells["Name"].Tag = new HierarchyRowMetadata(HierarchyItemKey.Folder(folder.Id), depth,
+                folder.ParentFolderId, ancestors, folder.IsExpanded);
+            ApplyFolderRuntimeVisual(row, runtime, scripts.Count == 0);
+            SelectRowIfNeeded(row, selectedItem);
+        }
+
+        private void AddScriptRow(ScriptDefinition script, int depth, IList<Guid> ancestors,
+            HierarchyItemKey selectedItem)
+        {
+            var type = Path.GetExtension(script.Path).TrimStart('.').ToUpperInvariant();
+            var runtime = _supervisor.GetSnapshot(script.Id);
+            var rowIndex = _grid.Rows.Add(ActivityGlyph(runtime.State), script.Name, type, InterpreterText(script),
+                script.Launch.AutoStartWithApplication ? _text["Common.Yes"] : _text["Common.No"], StateText(runtime),
+                runtime.ProcessId?.ToString() ?? "-", runtime.StartedAt?.ToString("g") ?? "-",
+                runtime.LastExitCode?.ToString() ?? "-", script.Path);
+            var row = _grid.Rows[rowIndex];
+            row.Tag = script.Id;
+            row.Cells["Name"].Tag = new HierarchyRowMetadata(HierarchyItemKey.Script(script.Id), depth,
+                script.FolderId, ancestors, false);
+            ApplyRuntimeVisual(row, script, runtime);
+            SelectRowIfNeeded(row, selectedItem);
+        }
+
+        private void SelectRowIfNeeded(DataGridViewRow row, HierarchyItemKey selectedItem)
+        {
+            var metadata = row.Cells["Name"].Tag as HierarchyRowMetadata;
+            if (selectedItem == null || metadata == null || !selectedItem.Equals(metadata.Item)) return;
+            row.Selected = true;
+            _grid.CurrentCell = row.Cells["Name"];
+        }
+
+        private bool FolderMatchesFilter(Guid folderId, string filter, ISet<Guid> visited)
+        {
+            if (!visited.Add(folderId)) return false;
+            var folder = Configuration.Folders.FirstOrDefault(item => item.Id == folderId);
+            if (folder == null) return false;
+            if (folder.Name.IndexOf(filter, StringComparison.CurrentCultureIgnoreCase) >= 0) return true;
+            foreach (var child in ScriptHierarchy.GetChildren(Configuration, folderId))
+            {
+                if (child.Kind == HierarchyItemKind.Folder)
+                {
+                    if (FolderMatchesFilter(child.Id, filter, visited)) return true;
+                }
+                else
+                {
+                    var script = Configuration.Scripts.FirstOrDefault(item => item.Id == child.Id);
+                    if (script != null && ScriptMatchesFilter(script, filter)) return true;
+                }
+            }
+            return false;
+        }
+
+        private static bool ScriptMatchesFilter(ScriptDefinition script, string filter)
+        {
+            var type = Path.GetExtension(script.Path).TrimStart('.').ToUpperInvariant();
+            return script.Name.IndexOf(filter, StringComparison.CurrentCultureIgnoreCase) >= 0 ||
+                script.Path.IndexOf(filter, StringComparison.CurrentCultureIgnoreCase) >= 0 ||
+                type.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                InterpreterText(script).IndexOf(filter, StringComparison.CurrentCultureIgnoreCase) >= 0;
+        }
+
+        private ScriptRuntimeSnapshot AggregateFolderRuntime(Guid folderId, IEnumerable<ScriptDefinition> scripts)
+        {
+            var snapshots = scripts.Select(script => _supervisor.GetSnapshot(script.Id)).ToArray();
+            var state = ScriptRuntimeState.Stopped;
+            if (snapshots.Any(item => item.State == ScriptRuntimeState.Stopping)) state = ScriptRuntimeState.Stopping;
+            else if (snapshots.Any(item => item.State == ScriptRuntimeState.Starting)) state = ScriptRuntimeState.Starting;
+            else if (snapshots.Any(item => item.State == ScriptRuntimeState.Running)) state = ScriptRuntimeState.Running;
+            else if (snapshots.Any(item => item.State == ScriptRuntimeState.Failed)) state = ScriptRuntimeState.Failed;
+            else if (snapshots.Any(item => item.State == ScriptRuntimeState.Exited)) state = ScriptRuntimeState.Exited;
+            return new ScriptRuntimeSnapshot
+            {
+                ScriptId = folderId,
+                State = state,
+                ActiveCount = snapshots.Sum(item => item.ActiveCount),
+                StartedAt = snapshots.Where(item => item.StartedAt.HasValue).Select(item => item.StartedAt).Min(),
+                Error = snapshots.Select(item => item.Error).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty
+            };
+        }
+
+        private string FolderPath(ScriptFolderDefinition folder)
+        {
+            var names = ScriptHierarchy.GetAncestorFolderIds(Configuration, folder.ParentFolderId)
+                .Select(id => Configuration.Folders.FirstOrDefault(item => item.Id == id)?.Name)
+                .Where(name => !string.IsNullOrWhiteSpace(name)).ToList();
+            names.Add(folder.Name);
+            return string.Join(" / ", names);
+        }
+
         private void AddScript()
         {
             using (var form = new ScriptEditorForm(null, Configuration.Defaults, Path.GetDirectoryName(_store.ConfigPath), _text,
-                Configuration.Application.Theme))
+                Configuration.Application.Theme, Configuration.Folders, SuggestedFolderId))
             {
                 if (form.ShowDialog(this) != DialogResult.OK) return;
                 var candidate = Configuration.Clone();
-                candidate.Scripts.Add(form.Result);
+                ScriptHierarchy.AppendScript(candidate, form.Result, form.Result.FolderId);
+                SaveConfiguration(candidate);
+            }
+        }
+
+        private void AddFolder()
+        {
+            var parentFolderId = SuggestedFolderId;
+            using (var form = new FolderEditorForm(null, parentFolderId, _text, Configuration.Application.Theme))
+            {
+                if (form.ShowDialog(this) != DialogResult.OK) return;
+                var candidate = Configuration.Clone();
+                ScriptHierarchy.AppendFolder(candidate, form.Result, parentFolderId);
+                var parent = candidate.Folders.FirstOrDefault(item => item.Id == parentFolderId);
+                if (parent != null) parent.IsExpanded = true;
                 SaveConfiguration(candidate);
             }
         }
 
         private void EditSelected()
         {
+            var selectedFolder = SelectedFolder;
+            if (selectedFolder != null)
+            {
+                EditFolder(selectedFolder);
+                return;
+            }
             var selected = SelectedScript;
             if (selected == null) return;
             using (var form = new ScriptEditorForm(selected, Configuration.Defaults, Path.GetDirectoryName(_store.ConfigPath), _text,
-                Configuration.Application.Theme))
+                Configuration.Application.Theme, Configuration.Folders, selected.FolderId))
             {
                 if (form.ShowDialog(this) != DialogResult.OK) return;
                 var candidate = Configuration.Clone();
                 var index = candidate.Scripts.FindIndex(item => item.Id == selected.Id);
+                var targetFolderId = form.Result.FolderId;
+                form.Result.FolderId = selected.FolderId;
+                form.Result.SortOrder = selected.SortOrder;
                 candidate.Scripts[index] = form.Result;
+                if (!Nullable.Equals(selected.FolderId, targetFolderId))
+                    ScriptHierarchy.MoveItem(candidate, HierarchyItemKey.Script(selected.Id), targetFolderId, int.MaxValue);
+                SaveConfiguration(candidate);
+            }
+        }
+
+        private void EditFolder(ScriptFolderDefinition selected)
+        {
+            using (var form = new FolderEditorForm(selected, selected.ParentFolderId, _text, Configuration.Application.Theme))
+            {
+                if (form.ShowDialog(this) != DialogResult.OK) return;
+                var candidate = Configuration.Clone();
+                var index = candidate.Folders.FindIndex(item => item.Id == selected.Id);
+                candidate.Folders[index] = form.Result;
                 SaveConfiguration(candidate);
             }
         }
 
         private async Task DeleteSelectedAsync()
         {
+            var selectedFolder = SelectedFolder;
+            if (selectedFolder != null)
+            {
+                await DeleteFolderAsync(selectedFolder);
+                return;
+            }
             var selected = SelectedScript;
             if (selected == null) return;
             if (_supervisor.IsRunning(selected.Id))
@@ -531,8 +695,29 @@ namespace CmdsManager.Presentation.Forms
             SaveConfiguration(candidate);
         }
 
+        private async Task DeleteFolderAsync(ScriptFolderDefinition folder)
+        {
+            if (Configuration.Application.ConfirmBeforeDelete)
+            {
+                var answer = MessageBox.Show(this, _text.Get("Main.DeleteFolderConfirm", folder.Name),
+                    _text["Main.DeleteFolderTitle"], MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
+                    MessageBoxDefaultButton.Button2);
+                if (answer != DialogResult.Yes) return;
+            }
+            await Task.Yield();
+            var candidate = Configuration.Clone();
+            ScriptHierarchy.RemoveFolderKeepingContents(candidate, folder.Id);
+            SaveConfiguration(candidate);
+        }
+
         private void StartSelected()
         {
+            var folder = SelectedFolder;
+            if (folder != null)
+            {
+                StartScripts(ScriptHierarchy.GetDescendantScripts(Configuration, folder.Id));
+                return;
+            }
             var selected = SelectedScript;
             if (selected == null) return;
             if (!selected.Enabled)
@@ -544,16 +729,57 @@ namespace CmdsManager.Presentation.Forms
             catch (Exception exception) { ShowError(_text.Get("Main.StartFailed", selected.Name), exception); }
         }
 
+        private void StartScripts(IEnumerable<ScriptDefinition> scripts)
+        {
+            var errors = new List<string>();
+            foreach (var script in scripts.Where(item => item.Enabled))
+            {
+                if (_supervisor.IsRunning(script.Id) && !script.Launch.AllowParallelInstances) continue;
+                try { _supervisor.Start(script, Configuration.PowerShell7Path); }
+                catch (Exception exception) { errors.Add(script.Name + ": " + exception.Message); }
+            }
+            if (errors.Count > 0)
+                MessageBox.Show(this, string.Join(Environment.NewLine, errors), _text["Main.RunTitle"],
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+
         private async Task StopSelectedAsync()
         {
+            var folder = SelectedFolder;
+            if (folder != null)
+            {
+                await StopScriptsAsync(ScriptHierarchy.GetDescendantScripts(Configuration, folder.Id));
+                return;
+            }
             var selected = SelectedScript;
             if (selected == null) return;
             try { await _supervisor.StopAsync(selected.Id); }
             catch (Exception exception) { ShowError(_text.Get("Main.StopFailed", selected.Name), exception); }
         }
 
+        private async Task StopScriptsAsync(IEnumerable<ScriptDefinition> scripts)
+        {
+            var errors = new List<string>();
+            foreach (var script in scripts.Where(item => _supervisor.IsRunning(item.Id)).Reverse())
+            {
+                try { await _supervisor.StopAsync(script.Id); }
+                catch (Exception exception) { errors.Add(script.Name + ": " + exception.Message); }
+            }
+            if (errors.Count > 0)
+                MessageBox.Show(this, string.Join(Environment.NewLine, errors), _text["Main.StopAllFailed"],
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+
         private async Task RestartSelectedAsync()
         {
+            var folder = SelectedFolder;
+            if (folder != null)
+            {
+                var scripts = ScriptHierarchy.GetDescendantScripts(Configuration, folder.Id).ToArray();
+                await StopScriptsAsync(scripts);
+                StartScripts(scripts);
+                return;
+            }
             var selected = SelectedScript;
             if (selected == null) return;
             try
@@ -572,6 +798,7 @@ namespace CmdsManager.Presentation.Forms
         private void RevealRunningScript(Guid scriptId)
         {
             ShowFromTray();
+            ExpandAncestorsForScript(scriptId);
             var row = _grid.Rows.Cast<DataGridViewRow>()
                 .FirstOrDefault(item => item.Tag is Guid && (Guid)item.Tag == scriptId);
             if (row == null && !string.IsNullOrWhiteSpace(_filter.Text))
@@ -594,6 +821,21 @@ namespace CmdsManager.Presentation.Forms
                 if (row.Index >= 0) _grid.FirstDisplayedScrollingRowIndex = row.Index;
             }
             _console.SelectScript(scriptId);
+        }
+
+        private void ExpandAncestorsForScript(Guid scriptId)
+        {
+            var script = Configuration.Scripts.FirstOrDefault(item => item.Id == scriptId);
+            if (script == null || !script.FolderId.HasValue) return;
+            var ancestorIds = ScriptHierarchy.GetAncestorFolderIds(Configuration, script.FolderId);
+            if (ancestorIds.All(id => Configuration.Folders.First(item => item.Id == id).IsExpanded)) return;
+            var candidate = Configuration.Clone();
+            foreach (var id in ancestorIds)
+            {
+                var folder = candidate.Folders.FirstOrDefault(item => item.Id == id);
+                if (folder != null) folder.IsExpanded = true;
+            }
+            SaveConfiguration(candidate);
         }
 
         private void EditSelectedFile()
@@ -707,14 +949,396 @@ namespace CmdsManager.Presentation.Forms
             if (selected != null) _console.SelectScript(selected.Id);
         }
 
+        private void HandleGridCellPainting(object sender, DataGridViewCellPaintingEventArgs args)
+        {
+            if (args.RowIndex < 0 || args.ColumnIndex != _grid.Columns["Name"].Index) return;
+            var row = _grid.Rows[args.RowIndex];
+            var metadata = row.Cells["Name"].Tag as HierarchyRowMetadata;
+            if (metadata == null) return;
+
+            args.PaintBackground(args.ClipBounds, true);
+            var textColor = row.Selected ? _palette.SelectionText : row.DefaultCellStyle.ForeColor;
+            if (textColor.IsEmpty) textColor = _palette.Text;
+            var hierarchyLeft = args.CellBounds.Left + 8 + metadata.Depth * 18;
+            var x = args.CellBounds.Left + HierarchyNameTextOffset(metadata);
+            var centerY = args.CellBounds.Top + args.CellBounds.Height / 2;
+            if (metadata.Item.Kind == HierarchyItemKind.Folder)
+            {
+                using (var pen = new Pen(row.Selected ? _palette.SelectionText : _palette.MutedText, 1.5f))
+                {
+                    pen.StartCap = System.Drawing.Drawing2D.LineCap.Round;
+                    pen.EndCap = System.Drawing.Drawing2D.LineCap.Round;
+                    if (metadata.IsExpanded)
+                    {
+                        args.Graphics.DrawLine(pen, hierarchyLeft + 2, centerY - 2, hierarchyLeft + 6, centerY + 2);
+                        args.Graphics.DrawLine(pen, hierarchyLeft + 6, centerY + 2, hierarchyLeft + 10, centerY - 2);
+                    }
+                    else
+                    {
+                        args.Graphics.DrawLine(pen, hierarchyLeft + 3, centerY - 4, hierarchyLeft + 7, centerY);
+                        args.Graphics.DrawLine(pen, hierarchyLeft + 7, centerY, hierarchyLeft + 3, centerY + 4);
+                    }
+                }
+                var folder = Configuration.Folders.FirstOrDefault(item => item.Id == metadata.Item.Id);
+                var iconColor = FolderIconRenderer.ParseColor(folder?.IconColor, _palette.Accent);
+                FolderIconRenderer.Draw(args.Graphics, new Rectangle(hierarchyLeft + 15, centerY - 9, 18, 18),
+                    folder?.Icon ?? FolderIconKind.Folder, iconColor);
+            }
+            var textBounds = new Rectangle(x, args.CellBounds.Top,
+                Math.Max(1, args.CellBounds.Right - x - 6), args.CellBounds.Height);
+            TextRenderer.DrawText(args.Graphics, Convert.ToString(args.FormattedValue),
+                args.CellStyle.Font,
+                textBounds, textColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
+                TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.PreserveGraphicsClipping);
+            args.Paint(args.ClipBounds, DataGridViewPaintParts.Border | DataGridViewPaintParts.Focus);
+            args.Handled = true;
+        }
+
+        private static int HierarchyNameTextOffset(HierarchyRowMetadata metadata)
+        {
+            if (metadata == null) return 8;
+            return 8 + metadata.Depth * 18 +
+                (metadata.Item.Kind == HierarchyItemKind.Folder ? 39 : 2);
+        }
+
+        private void HandleGridCellMouseClick(object sender, DataGridViewCellMouseEventArgs args)
+        {
+            if (args.Button != MouseButtons.Left || args.RowIndex < 0 ||
+                args.ColumnIndex != _grid.Columns["Name"].Index) return;
+            var row = _grid.Rows[args.RowIndex];
+            var metadata = row.Cells["Name"].Tag as HierarchyRowMetadata;
+            if (metadata == null || metadata.Item.Kind != HierarchyItemKind.Folder) return;
+            var chevronLeft = 8 + metadata.Depth * 18;
+            if (args.X >= chevronLeft - 2 && args.X <= chevronLeft + 13) ToggleFolder(metadata.Item.Id, null);
+        }
+
+        private void HandleGridCellDoubleClick(object sender, DataGridViewCellEventArgs args)
+        {
+            if (args.RowIndex < 0) return;
+            var metadata = _grid.Rows[args.RowIndex].Cells["Name"].Tag as HierarchyRowMetadata;
+            if (metadata != null && metadata.Item.Kind == HierarchyItemKind.Folder)
+                ToggleFolder(metadata.Item.Id, null);
+            else
+                EditSelected();
+        }
+
+        private void ToggleFolder(Guid folderId, bool? expanded)
+        {
+            var candidate = Configuration.Clone();
+            var folder = candidate.Folders.FirstOrDefault(item => item.Id == folderId);
+            if (folder == null) return;
+            folder.IsExpanded = expanded ?? !folder.IsExpanded;
+            SaveConfiguration(candidate);
+        }
+
+        private void HandleGridMouseDown(object sender, MouseEventArgs args)
+        {
+            _dragStart = Point.Empty;
+            _draggedItem = null;
+            if (args.Button != MouseButtons.Left) return;
+            var hit = _grid.HitTest(args.X, args.Y);
+            if (hit.RowIndex < 0) return;
+            var row = _grid.Rows[hit.RowIndex];
+            var metadata = row.Cells["Name"].Tag as HierarchyRowMetadata;
+            if (metadata == null) return;
+            _grid.CurrentCell = row.Cells[Math.Max(0, hit.ColumnIndex)];
+            row.Selected = true;
+            _dragStart = args.Location;
+            _draggedItem = metadata.Item;
+        }
+
+        private void HandleGridMouseMove(object sender, MouseEventArgs args)
+        {
+            if (_draggedItem == null || _dragStart == Point.Empty || (args.Button & MouseButtons.Left) == 0) return;
+            var dragSize = SystemInformation.DragSize;
+            var dragBounds = new Rectangle(_dragStart.X - dragSize.Width / 2,
+                _dragStart.Y - dragSize.Height / 2, dragSize.Width, dragSize.Height);
+            if (dragBounds.Contains(args.Location)) return;
+            var item = _draggedItem;
+            try
+            {
+                _grid.DoDragDrop(item, DragDropEffects.Move);
+            }
+            finally
+            {
+                _dragStart = Point.Empty;
+                _draggedItem = null;
+                ClearDropIndicator();
+            }
+        }
+
+        private void HandleGridDragOver(object sender, DragEventArgs args)
+        {
+            var item = args.Data.GetData(typeof(HierarchyItemKey)) as HierarchyItemKey;
+            if (item == null)
+            {
+                args.Effect = DragDropEffects.None;
+                ClearDropIndicator();
+                return;
+            }
+
+            var point = _grid.PointToClient(new Point(args.X, args.Y));
+            AutoScrollGrid(point);
+            var indicator = CalculateDropIndicator(point, item);
+            if (indicator == null || !CanDrop(item, indicator.ParentFolderId))
+            {
+                args.Effect = DragDropEffects.None;
+                ClearDropIndicator();
+                return;
+            }
+
+            args.Effect = DragDropEffects.Move;
+            HandleDragHoverExpansion(indicator.HoverFolderId);
+            SetDropIndicator(indicator);
+        }
+
+        private void HandleGridDragDrop(object sender, DragEventArgs args)
+        {
+            var item = args.Data.GetData(typeof(HierarchyItemKey)) as HierarchyItemKey;
+            var indicator = _dropIndicator;
+            ClearDropIndicator();
+            if (item == null || indicator == null || !CanDrop(item, indicator.ParentFolderId)) return;
+            try
+            {
+                var candidate = Configuration.Clone();
+                ScriptHierarchy.MoveItem(candidate, item, indicator.ParentFolderId, indicator.InsertIndex);
+                var parent = candidate.Folders.FirstOrDefault(folder => folder.Id == indicator.ParentFolderId);
+                if (parent != null) parent.IsExpanded = true;
+                SaveConfiguration(candidate);
+            }
+            catch (Exception exception)
+            {
+                ShowError(_text["Main.MoveFailed"], exception);
+            }
+        }
+
+        private void HandleGridDragLeave(object sender, EventArgs args)
+        {
+            ClearDropIndicator();
+        }
+
+        private void HandleGridPaint(object sender, PaintEventArgs args)
+        {
+            var indicator = _dropIndicator;
+            if (indicator == null) return;
+            var startX = Math.Max(2, indicator.LineX);
+            var endX = Math.Max(startX + 12, _grid.ClientSize.Width - 4);
+            using (var pen = new Pen(_palette.Accent, 2f))
+            using (var brush = new SolidBrush(_palette.Accent))
+            {
+                pen.StartCap = System.Drawing.Drawing2D.LineCap.Round;
+                pen.EndCap = System.Drawing.Drawing2D.LineCap.Round;
+                args.Graphics.DrawLine(pen, startX, indicator.LineY, endX, indicator.LineY);
+                args.Graphics.FillEllipse(brush, startX - 3, indicator.LineY - 3, 6, 6);
+            }
+        }
+
+        private HierarchyDropIndicator CalculateDropIndicator(Point point, HierarchyItemKey draggedItem)
+        {
+            var nameColumn = _grid.Columns["Name"];
+            if (_grid.Rows.Count == 0)
+                return new HierarchyDropIndicator(null, 0, _grid.ColumnHeadersHeight + 1, nameColumn.DisplayIndex + 8, null);
+
+            var hit = _grid.HitTest(point.X, point.Y);
+            if (hit.RowIndex < 0)
+            {
+                if (point.Y <= _grid.ColumnHeadersHeight) return null;
+                var lastRow = _grid.Rows[_grid.Rows.Count - 1];
+                var lastBounds = _grid.GetRowDisplayRectangle(lastRow.Index, false);
+                return new HierarchyDropIndicator(null,
+                    CountChildrenExcluding(null, draggedItem), lastBounds.Bottom - 1,
+                    _grid.GetCellDisplayRectangle(nameColumn.Index, lastRow.Index, false).Left + 8, null);
+            }
+
+            var row = _grid.Rows[hit.RowIndex];
+            var metadata = row.Cells["Name"].Tag as HierarchyRowMetadata;
+            if (metadata == null) return null;
+            var rowBounds = _grid.GetRowDisplayRectangle(row.Index, false);
+            var nameBounds = _grid.GetCellDisplayRectangle(nameColumn.Index, row.Index, false);
+            var relativeY = rowBounds.Height <= 0 ? 0.5f : (point.Y - rowBounds.Top) / (float)rowBounds.Height;
+
+            if (metadata.Item.Kind == HierarchyItemKind.Folder && relativeY >= 0.27f && relativeY <= 0.73f)
+            {
+                var bottomIndex = LastVisibleDescendantRow(row.Index, metadata.Depth);
+                var bottomBounds = _grid.GetRowDisplayRectangle(bottomIndex, false);
+                return new HierarchyDropIndicator(metadata.Item.Id,
+                    CountChildrenExcluding(metadata.Item.Id, draggedItem), bottomBounds.Bottom - 1,
+                    nameBounds.Left + 8 + (metadata.Depth + 1) * 18, metadata.Item.Id);
+            }
+
+            var outdentThreshold = nameBounds.Left + 8 + metadata.Depth * 18 - 5;
+            if (metadata.Depth > 0 && point.X < outdentThreshold && metadata.Ancestors.Count > 0)
+            {
+                var desiredDepth = Math.Max(0, Math.Min(metadata.Depth - 1,
+                    (point.X - nameBounds.Left - 8) / 18));
+                var anchorFolderId = metadata.Ancestors[desiredDepth];
+                var parentFolderId = desiredDepth == 0 ? (Guid?)null : metadata.Ancestors[desiredDepth - 1];
+                var anchor = HierarchyItemKey.Folder(anchorFolderId);
+                var insertIndex = IndexAfter(parentFolderId, anchor, draggedItem);
+                var anchorRow = FindFolderRow(anchorFolderId);
+                var lineRowIndex = anchorRow == null ? row.Index : LastVisibleDescendantRow(anchorRow.Index, desiredDepth);
+                var lineBounds = _grid.GetRowDisplayRectangle(lineRowIndex, false);
+                return new HierarchyDropIndicator(parentFolderId, insertIndex, lineBounds.Bottom - 1,
+                    nameBounds.Left + 8 + desiredDepth * 18, null);
+            }
+
+            var after = relativeY >= 0.5f;
+            var lineIndex = after && metadata.Item.Kind == HierarchyItemKind.Folder
+                ? LastVisibleDescendantRow(row.Index, metadata.Depth)
+                : row.Index;
+            var lineBoundsNormal = _grid.GetRowDisplayRectangle(lineIndex, false);
+            return new HierarchyDropIndicator(metadata.ParentFolderId,
+                IndexRelativeTo(metadata.ParentFolderId, metadata.Item, draggedItem, after),
+                after ? lineBoundsNormal.Bottom - 1 : rowBounds.Top,
+                nameBounds.Left + 8 + metadata.Depth * 18, null);
+        }
+
+        private int IndexRelativeTo(Guid? parentFolderId, HierarchyItemKey anchor, HierarchyItemKey draggedItem, bool after)
+        {
+            var children = ScriptHierarchy.GetChildren(Configuration, parentFolderId).ToList();
+            var anchorIndex = children.FindIndex(item => item.Equals(anchor));
+            if (anchorIndex < 0) return CountChildrenExcluding(parentFolderId, draggedItem);
+            var boundary = anchorIndex + (after ? 1 : 0);
+            return children.Take(boundary).Count(item => !item.Equals(draggedItem));
+        }
+
+        private int IndexAfter(Guid? parentFolderId, HierarchyItemKey anchor, HierarchyItemKey draggedItem)
+        {
+            return IndexRelativeTo(parentFolderId, anchor, draggedItem, true);
+        }
+
+        private int CountChildrenExcluding(Guid? parentFolderId, HierarchyItemKey draggedItem)
+        {
+            return ScriptHierarchy.GetChildren(Configuration, parentFolderId).Count(item => !item.Equals(draggedItem));
+        }
+
+        private int LastVisibleDescendantRow(int rowIndex, int depth)
+        {
+            var last = rowIndex;
+            for (var index = rowIndex + 1; index < _grid.Rows.Count; index++)
+            {
+                var metadata = _grid.Rows[index].Cells["Name"].Tag as HierarchyRowMetadata;
+                if (metadata == null || metadata.Depth <= depth) break;
+                last = index;
+            }
+            return last;
+        }
+
+        private DataGridViewRow FindFolderRow(Guid folderId)
+        {
+            return _grid.Rows.Cast<DataGridViewRow>()
+                .FirstOrDefault(row => (row.Tag as FolderGridRowTag)?.Id == folderId);
+        }
+
+        private bool CanDrop(HierarchyItemKey item, Guid? parentFolderId)
+        {
+            if (item.Kind != HierarchyItemKind.Folder) return true;
+            if (parentFolderId == item.Id) return false;
+            return !parentFolderId.HasValue || !ScriptHierarchy.IsDescendantFolder(Configuration,
+                parentFolderId.Value, item.Id);
+        }
+
+        private void HandleDragHoverExpansion(Guid? folderId)
+        {
+            if (!folderId.HasValue)
+            {
+                _dragHoverFolderId = null;
+                return;
+            }
+            var folder = Configuration.Folders.FirstOrDefault(item => item.Id == folderId.Value);
+            if (folder == null || folder.IsExpanded)
+            {
+                _dragHoverFolderId = null;
+                return;
+            }
+            if (_dragHoverFolderId != folderId)
+            {
+                _dragHoverFolderId = folderId;
+                _dragHoverStartedUtc = DateTime.UtcNow;
+                return;
+            }
+            if (DateTime.UtcNow - _dragHoverStartedUtc < TimeSpan.FromMilliseconds(650)) return;
+            folder.IsExpanded = true;
+            try
+            {
+                _store.Save(Configuration);
+                RefreshGrid();
+            }
+            catch (Exception exception)
+            {
+                folder.IsExpanded = false;
+                _log.Warning("Unable to persist drag-hover folder expansion: " + exception.Message);
+            }
+            _dragHoverFolderId = null;
+        }
+
+        private void AutoScrollGrid(Point point)
+        {
+            if (_grid.Rows.Count == 0) return;
+            if (point.Y < _grid.ColumnHeadersHeight + 22 && _grid.FirstDisplayedScrollingRowIndex > 0)
+                _grid.FirstDisplayedScrollingRowIndex--;
+            else if (point.Y > _grid.ClientSize.Height - 22)
+            {
+                var first = _grid.FirstDisplayedScrollingRowIndex;
+                var displayed = _grid.DisplayedRowCount(false);
+                if (first >= 0 && first + displayed < _grid.Rows.Count)
+                    _grid.FirstDisplayedScrollingRowIndex++;
+            }
+        }
+
+        private void ClearDropIndicator()
+        {
+            var previous = _dropIndicator;
+            _dropIndicator = null;
+            _dragHoverFolderId = null;
+            InvalidateDropIndicator(previous);
+        }
+
+        private void SetDropIndicator(HierarchyDropIndicator indicator)
+        {
+            if (DropIndicatorsEqual(_dropIndicator, indicator)) return;
+            var previous = _dropIndicator;
+            _dropIndicator = indicator;
+            InvalidateDropIndicator(previous);
+            InvalidateDropIndicator(indicator);
+        }
+
+        private void InvalidateDropIndicator(HierarchyDropIndicator indicator)
+        {
+            if (indicator == null || _grid.IsDisposed) return;
+            _grid.Invalidate(new Rectangle(0, Math.Max(0, indicator.LineY - 4),
+                Math.Max(1, _grid.ClientSize.Width), 9));
+        }
+
+        private static bool DropIndicatorsEqual(HierarchyDropIndicator first, HierarchyDropIndicator second)
+        {
+            if (ReferenceEquals(first, second)) return true;
+            if (first == null || second == null) return false;
+            return first.ParentFolderId == second.ParentFolderId &&
+                first.InsertIndex == second.InsertIndex &&
+                first.LineY == second.LineY && first.LineX == second.LineX &&
+                first.HoverFolderId == second.HoverFolderId;
+        }
+
         private void ApplyRuntimeVisual(DataGridViewRow row, ScriptDefinition script, ScriptRuntimeSnapshot runtime)
+        {
+            ApplyRuntimeVisualCore(row, runtime, script.Enabled, null);
+        }
+
+        private void ApplyFolderRuntimeVisual(DataGridViewRow row, ScriptRuntimeSnapshot runtime, bool empty)
+        {
+            ApplyRuntimeVisualCore(row, runtime, true, empty ? _text["Main.Folder.Empty"] : null);
+        }
+
+        private void ApplyRuntimeVisualCore(DataGridViewRow row, ScriptRuntimeSnapshot runtime, bool enabled,
+            string stateTextOverride)
         {
             var active = runtime.State == ScriptRuntimeState.Starting ||
                 runtime.State == ScriptRuntimeState.Running || runtime.State == ScriptRuntimeState.Stopping;
-            var rowColor = script.Enabled || active ? _palette.Text : _palette.DisabledText;
+            var rowColor = enabled || active ? _palette.Text : _palette.DisabledText;
             if (row.DefaultCellStyle.ForeColor != rowColor) row.DefaultCellStyle.ForeColor = rowColor;
 
-            var stateText = StateText(runtime);
+            var stateText = stateTextOverride ?? StateText(runtime);
             SetCellText(row.Cells["State"], stateText);
             SetCellText(row.Cells["Pid"], runtime.ProcessId?.ToString() ?? "-");
             SetCellText(row.Cells["Started"], runtime.StartedAt?.ToString("g") ?? "-");
@@ -849,8 +1473,39 @@ namespace CmdsManager.Presentation.Forms
 
         protected override bool ProcessCmdKey(ref Message message, Keys keyData)
         {
+            if (_grid.ContainsFocus && (keyData & Keys.Modifiers) == Keys.None &&
+                ((keyData & Keys.KeyCode) == Keys.Left || (keyData & Keys.KeyCode) == Keys.Right) &&
+                HandleHierarchyArrowKey(keyData & Keys.KeyCode))
+                return true;
             if (TryHandleApplicationHotkey(keyData)) return true;
             return base.ProcessCmdKey(ref message, keyData);
+        }
+
+        private bool HandleHierarchyArrowKey(Keys keyCode)
+        {
+            if (_grid.SelectedRows.Count == 0) return false;
+            var metadata = _grid.SelectedRows[0].Cells["Name"].Tag as HierarchyRowMetadata;
+            if (metadata == null) return false;
+            if (keyCode == Keys.Right && metadata.Item.Kind == HierarchyItemKind.Folder && !metadata.IsExpanded)
+            {
+                ToggleFolder(metadata.Item.Id, true);
+                return true;
+            }
+            if (keyCode == Keys.Left && metadata.Item.Kind == HierarchyItemKind.Folder && metadata.IsExpanded)
+            {
+                ToggleFolder(metadata.Item.Id, false);
+                return true;
+            }
+            if (keyCode == Keys.Left && metadata.ParentFolderId.HasValue)
+            {
+                var row = FindFolderRow(metadata.ParentFolderId.Value);
+                if (row == null) return false;
+                _grid.ClearSelection();
+                row.Selected = true;
+                _grid.CurrentCell = row.Cells["Name"];
+                return true;
+            }
+            return false;
         }
 
         private bool TryHandleApplicationHotkey(Keys keyData)
@@ -1210,9 +1865,18 @@ namespace CmdsManager.Presentation.Forms
             ApplyToolbarIcons();
             foreach (DataGridViewRow row in _grid.Rows)
             {
-                if (!(row.Tag is Guid)) continue;
-                var script = Configuration.Scripts.FirstOrDefault(item => item.Id == (Guid)row.Tag);
-                if (script != null) ApplyRuntimeVisual(row, script, _supervisor.GetSnapshot(script.Id));
+                if (row.Tag is Guid)
+                {
+                    var script = Configuration.Scripts.FirstOrDefault(item => item.Id == (Guid)row.Tag);
+                    if (script != null) ApplyRuntimeVisual(row, script, _supervisor.GetSnapshot(script.Id));
+                }
+                else
+                {
+                    var folderTag = row.Tag as FolderGridRowTag;
+                    if (folderTag == null) continue;
+                    var scripts = ScriptHierarchy.GetDescendantScripts(Configuration, folderTag.Id);
+                    ApplyFolderRuntimeVisual(row, AggregateFolderRuntime(folderTag.Id, scripts), scripts.Count == 0);
+                }
             }
             _grid.Invalidate();
         }
@@ -1247,14 +1911,66 @@ namespace CmdsManager.Presentation.Forms
             }
         }
 
+        private ScriptFolderDefinition SelectedFolder
+        {
+            get
+            {
+                if (_grid.SelectedRows.Count == 0) return null;
+                var tag = _grid.SelectedRows[0].Tag as FolderGridRowTag;
+                return tag == null ? null : Configuration.Folders.FirstOrDefault(item => item.Id == tag.Id);
+            }
+        }
+
+        private HierarchyItemKey SelectedHierarchyItem
+        {
+            get
+            {
+                if (_grid.SelectedRows.Count == 0) return null;
+                var metadata = _grid.SelectedRows[0].Cells["Name"].Tag as HierarchyRowMetadata;
+                return metadata?.Item;
+            }
+        }
+
+        private Guid? SuggestedFolderId
+        {
+            get
+            {
+                var folder = SelectedFolder;
+                if (folder != null) return folder.Id;
+                return SelectedScript?.FolderId;
+            }
+        }
+
         private void UpdateButtons()
         {
             var selected = SelectedScript;
+            var folder = SelectedFolder;
             var running = selected != null && _supervisor.IsRunning(selected.Id);
-            _editButton.Enabled = selected != null;
-            _deleteButton.Enabled = selected != null && !running;
-            _startButton.Enabled = selected != null && selected.Enabled && (!running || selected.Launch.AllowParallelInstances);
-            _stopButton.Enabled = running;
+            var folderScripts = folder == null
+                ? new ScriptDefinition[0]
+                : ScriptHierarchy.GetDescendantScripts(Configuration, folder.Id).ToArray();
+            _editButton.Enabled = selected != null || folder != null;
+            _deleteButton.Enabled = folder != null || (selected != null && !running);
+            _startButton.Enabled = selected != null
+                ? selected.Enabled && (!running || selected.Launch.AllowParallelInstances)
+                : folderScripts.Any(item => item.Enabled && (!_supervisor.IsRunning(item.Id) || item.Launch.AllowParallelInstances));
+            _stopButton.Enabled = selected != null ? running : folderScripts.Any(item => _supervisor.IsRunning(item.Id));
+        }
+
+        private void HandleContextOpening(object sender, CancelEventArgs args)
+        {
+            var script = SelectedScript;
+            var folder = SelectedFolder;
+            _contextAddFolder.Text = folder == null ? _text["Main.Context.NewFolder"] : _text["Main.Context.NewSubfolder"];
+            _contextEdit.Text = folder == null ? _text["Main.Context.EditEntry"] : _text["Main.Context.EditFolder"];
+            _contextDelete.Text = folder == null ? _text["Main.Context.DeleteEntry"] : _text["Main.Context.DeleteFolder"];
+            _contextEditFile.Visible = script != null;
+            _contextShowInFolder.Visible = script != null;
+            UpdateButtons();
+            _contextStart.Enabled = _startButton.Enabled;
+            _contextStop.Enabled = _stopButton.Enabled;
+            _contextEdit.Enabled = _editButton.Enabled;
+            _contextDelete.Enabled = _deleteButton.Enabled;
         }
 
         private void HandleFormClosing(object sender, FormClosingEventArgs args)
@@ -1308,7 +2024,61 @@ namespace CmdsManager.Presentation.Forms
 
         private static DataGridViewTextBoxColumn Column(string name, int width)
         {
-            return new DataGridViewTextBoxColumn { Name = name, Width = width, SortMode = DataGridViewColumnSortMode.Automatic };
+            return new DataGridViewTextBoxColumn { Name = name, Width = width, SortMode = DataGridViewColumnSortMode.NotSortable };
+        }
+
+        private sealed class DoubleBufferedDataGridView : DataGridView
+        {
+            internal DoubleBufferedDataGridView()
+            {
+                DoubleBuffered = true;
+                SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
+                    ControlStyles.ResizeRedraw, true);
+            }
+        }
+
+        private sealed class FolderGridRowTag
+        {
+            internal FolderGridRowTag(Guid id) { Id = id; }
+            internal Guid Id { get; }
+        }
+
+        private sealed class HierarchyRowMetadata
+        {
+            internal HierarchyRowMetadata(HierarchyItemKey item, int depth, Guid? parentFolderId,
+                IEnumerable<Guid> ancestors, bool isExpanded)
+            {
+                Item = item;
+                Depth = depth;
+                ParentFolderId = parentFolderId;
+                Ancestors = (ancestors ?? Enumerable.Empty<Guid>()).ToArray();
+                IsExpanded = isExpanded;
+            }
+
+            internal HierarchyItemKey Item { get; }
+            internal int Depth { get; }
+            internal Guid? ParentFolderId { get; }
+            internal IReadOnlyList<Guid> Ancestors { get; }
+            internal bool IsExpanded { get; }
+        }
+
+        private sealed class HierarchyDropIndicator
+        {
+            internal HierarchyDropIndicator(Guid? parentFolderId, int insertIndex, int lineY, int lineX,
+                Guid? hoverFolderId)
+            {
+                ParentFolderId = parentFolderId;
+                InsertIndex = insertIndex;
+                LineY = lineY;
+                LineX = lineX;
+                HoverFolderId = hoverFolderId;
+            }
+
+            internal Guid? ParentFolderId { get; }
+            internal int InsertIndex { get; }
+            internal int LineY { get; }
+            internal int LineX { get; }
+            internal Guid? HoverFolderId { get; }
         }
 
         private static string InterpreterText(ScriptDefinition script)

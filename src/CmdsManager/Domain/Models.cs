@@ -45,6 +45,40 @@ namespace CmdsManager.Domain
         Failed
     }
 
+    public enum FolderIconKind
+    {
+        Folder,
+        Terminal,
+        Code,
+        Lightning,
+        Rocket,
+        Gear,
+        Database,
+        Server,
+        Globe,
+        Star,
+        Money,
+        Book,
+        Graduation,
+        Pencil,
+        Music,
+        Trash,
+        Scissors,
+        Palette,
+        Stethoscope,
+        Lotus,
+        Briefcase,
+        Chart,
+        Dumbbell,
+        Scales,
+        Wrench,
+        Paw,
+        Flask,
+        Brain,
+        Heart,
+        Gift
+    }
+
     public enum ApplicationTheme
     {
         System,
@@ -212,6 +246,8 @@ namespace CmdsManager.Domain
         public string Name { get; set; } = string.Empty;
         public bool Enabled { get; set; } = true;
         public string Path { get; set; } = string.Empty;
+        public Guid? FolderId { get; set; }
+        public int SortOrder { get; set; }
         public LaunchProfile Launch { get; set; } = new LaunchProfile();
 
         public ScriptDefinition Clone()
@@ -222,9 +258,25 @@ namespace CmdsManager.Domain
         }
     }
 
+    public sealed class ScriptFolderDefinition
+    {
+        public Guid Id { get; set; } = Guid.NewGuid();
+        public string Name { get; set; } = string.Empty;
+        public Guid? ParentFolderId { get; set; }
+        public int SortOrder { get; set; }
+        public FolderIconKind Icon { get; set; } = FolderIconKind.Folder;
+        public string IconColor { get; set; } = "#4F46E5";
+        public bool IsExpanded { get; set; } = true;
+
+        public ScriptFolderDefinition Clone()
+        {
+            return (ScriptFolderDefinition)MemberwiseClone();
+        }
+    }
+
     public sealed class ApplicationSettings
     {
-        public int ConfigVersion { get; set; } = 12;
+        public int ConfigVersion { get; set; } = 13;
         public ApplicationTheme Theme { get; set; } = ApplicationTheme.System;
         public bool CloseToTray { get; set; } = true;
         public bool StartMinimized { get; set; }
@@ -302,6 +354,7 @@ namespace CmdsManager.Domain
         public LaunchProfile Defaults { get; set; } = new LaunchProfile();
         public string PowerShell7Path { get; set; } = string.Empty;
         public LocalizationSettings Localization { get; set; } = new LocalizationSettings();
+        public List<ScriptFolderDefinition> Folders { get; set; } = new List<ScriptFolderDefinition>();
         public List<ScriptDefinition> Scripts { get; set; } = new List<ScriptDefinition>();
 
         public AppConfiguration Clone()
@@ -313,6 +366,11 @@ namespace CmdsManager.Domain
                 PowerShell7Path = PowerShell7Path ?? string.Empty,
                 Localization = Localization?.Clone() ?? new LocalizationSettings()
             };
+
+            foreach (var folder in Folders)
+            {
+                clone.Folders.Add(folder.Clone());
+            }
 
             foreach (var script in Scripts)
             {
