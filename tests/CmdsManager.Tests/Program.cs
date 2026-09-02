@@ -40,6 +40,7 @@ namespace CmdsManager.Tests
             Run("Compact localized dialogs", TestCompactLocalizedDialogs);
             Run("Fluent folder tree and drag targets", TestFolderTreeUi);
             Run("Batched console output", TestBatchedConsoleOutput);
+            Run("ANSI console rendering", TestAnsiConsoleRendering);
             Run("Console search and scroll lock", TestConsoleSearchAndScrollLock);
             Run("Console recording and limits", TestConsoleRecording);
             Run("Running script visual indicator", TestRunningVisualIndicator);
@@ -512,7 +513,7 @@ namespace CmdsManager.Tests
                 @"..\..\..\..\Readme.txt"));
             Assert(File.Exists(readmePath), "release Readme.txt exists at the repository root");
             var guide = File.ReadAllText(readmePath, Encoding.UTF8);
-            Assert(guide.StartsWith("CMDS MANAGER 1.2.0", StringComparison.Ordinal),
+            Assert(guide.StartsWith("CMDS MANAGER 1.3.0", StringComparison.Ordinal),
                 "user guide identifies the stable release");
             foreach (var heading in new[]
             {
@@ -526,7 +527,7 @@ namespace CmdsManager.Tests
 
             foreach (var version in new[]
             {
-                "1.2.0", "1.1.6", "1.1.5", "1.1.4", "1.1.3", "1.1.2", "1.1.1", "1.1.0", "1.0.0", "0.6.6", "0.6.5", "0.6.4", "0.6.3", "0.6.2", "0.6.1", "0.6.0",
+                "1.3.0", "1.2.0", "1.1.6", "1.1.5", "1.1.4", "1.1.3", "1.1.2", "1.1.1", "1.1.0", "1.0.0", "0.6.6", "0.6.5", "0.6.4", "0.6.3", "0.6.2", "0.6.1", "0.6.0",
                 "0.5.1", "0.5.0", "0.4.2", "0.4.1", "0.4.0", "0.3.0", "0.2.1", "0.2.0", "0.1.0-dev"
             })
             {
@@ -1341,7 +1342,7 @@ namespace CmdsManager.Tests
                         "embedded 128 px PNG icon frame is decoded without pixel corruption");
                     var aboutTitle = AllControls(about).OfType<Label>().First(control => control.Text == "Cmds Manager");
                     var aboutVersion = AllControls(about).OfType<Label>().First(control => control.Text.StartsWith("Version ", StringComparison.Ordinal));
-                    Equal("Version 1.2.0", aboutVersion.Text, "About contains the stable release version");
+                    Equal("Version 1.3.0", aboutVersion.Text, "About contains the stable release version");
                     var aboutBuild = AllControls(about).OfType<Label>()
                         .First(control => control.Text.StartsWith("Built on: ", StringComparison.Ordinal));
                     DateTime parsedBuildTimestamp;
@@ -1796,6 +1797,137 @@ namespace CmdsManager.Tests
             });
         }
 
+        private static void TestAnsiConsoleRendering()
+        {
+            const string escape = "\x1b";
+            var sample = new AnsiTextParser().Parse(
+                escape + "[2m03:30:04" + escape + "[22m " + escape + "[36m" +
+                escape + "[1m[vite]" + escape + "[22m" + escape + "[39m ready ✨🚀→➜");
+            Equal("03:30:04 [vite] ready ✨🚀→➜", sample.PlainText,
+                "ANSI parser removes SGR sequences without changing Unicode glyphs");
+            Assert(sample.Runs.Any(run => run.Text.Contains("03:30:04") && run.Style.Dim),
+                "ANSI dim style is retained as a render run");
+            Assert(sample.Runs.Any(run => run.Text.Contains("[vite]") && run.Style.Bold &&
+                run.Style.Foreground.Kind == AnsiColorKind.Indexed && run.Style.Foreground.Index == 6),
+                "ANSI bold and cyan styles are retained as a render run");
+
+            var persistent = new AnsiTextParser();
+            persistent.Parse(escape + "[32mgreen first");
+            var continued = persistent.Parse("green second" + escape + "[39m default");
+            Assert(continued.Runs.First().Style.Foreground.Kind == AnsiColorKind.Indexed &&
+                continued.Runs.First().Style.Foreground.Index == 2,
+                "ANSI state persists between console lines until reset");
+            Assert(continued.Runs.Last().Style.Foreground.Kind == AnsiColorKind.Default,
+                "ANSI default foreground restores the configured console color");
+
+            var extended = new AnsiTextParser().Parse(
+                escape + "[38;5;202mindexed" + escape + "[48;2;12;34;56mtruecolor");
+            Assert(extended.Runs.First().Style.Foreground.Kind == AnsiColorKind.Indexed &&
+                extended.Runs.First().Style.Foreground.Index == 202,
+                "ANSI 256-color foreground is parsed");
+            Assert(extended.Runs.Last().Style.Background.Kind == AnsiColorKind.Rgb &&
+                extended.Runs.Last().Style.Background.Red == 12 &&
+                extended.Runs.Last().Style.Background.Green == 34 &&
+                extended.Runs.Last().Style.Background.Blue == 56,
+                "ANSI true-color background is parsed");
+            var colonColor = new AnsiTextParser().Parse(escape + "[38:2::7:8:9mcolon");
+            Assert(colonColor.Runs.Single().Style.Foreground.Kind == AnsiColorKind.Rgb &&
+                colonColor.Runs.Single().Style.Foreground.Red == 7 &&
+                colonColor.Runs.Single().Style.Foreground.Green == 8 &&
+                colonColor.Runs.Single().Style.Foreground.Blue == 9,
+                "ANSI colon-form true color is parsed");
+            Equal("link visible", AnsiTextParser.Strip(
+                escape + "]8;;https://example.com\alink visible" + escape + "]8;;\a"),
+                "OSC hyperlink wrappers are removed while their visible label is kept");
+            Equal("clean", AnsiTextParser.Strip(escape + "[2J" + escape + "]0;title\a" +
+                escape + "(Bclean"), "non-SGR ANSI controls are removed from plain text");
+
+            WithTemporaryDirectory(directory =>
+            {
+                var configuration = new ConfigurationStore(Path.Combine(directory, "CmdsManager.ini")).LoadOrCreate();
+                configuration.Localization.Language = "en";
+                configuration.Application.ConsoleFontName = "Consolas";
+                configuration.Application.ConsoleForegroundColor = "#DCDCDC";
+                configuration.Application.ConsoleBackgroundColor = "#1C1C1C";
+                configuration.Application.ConsoleBackgroundOpacity = 100;
+                configuration.Application.ConsoleAutoRecord = true;
+                var state = new ConfigurationState(configuration);
+                var text = new LocalizationService(state);
+                var logDirectory = Path.Combine(directory, "ansi-logs");
+                using (var console = new ConsoleTabsControl(text, () => state.Current.Application,
+                    null, logDirectory))
+                {
+                    console.Size = new Size(760, 320);
+                    console.CreateControl();
+                    var scriptId = Guid.NewGuid();
+                    const int processId = 4444;
+                    console.EnqueueStarted(new ScriptInstanceEventArgs(scriptId, "ANSI output", processId,
+                        DateTime.Now, true, null, ScriptOutputEncoding.Utf8));
+                    console.EnqueueOutput(new ScriptOutputEventArgs(scriptId, processId,
+                        escape + "[31mred" + escape + "[39m plain", false));
+                    console.EnqueueOutput(new ScriptOutputEventArgs(scriptId, processId,
+                        escape + "[1;36mbold cyan" + escape + "[22;39m", false));
+                    console.EnqueueOutput(new ScriptOutputEventArgs(scriptId, processId,
+                        escape + "[38;5;202mindexed" + escape + "[0m", false));
+                    console.EnqueueOutput(new ScriptOutputEventArgs(scriptId, processId,
+                        escape + "[38;2;12;34;56mtruecolor" + escape + "[0m", false));
+                    console.EnqueueOutput(new ScriptOutputEventArgs(scriptId, processId,
+                        escape + "]8;;https://example.com\alink" + escape + "]8;;\a clean", false));
+
+                    RichTextBox output = null;
+                    Assert(WaitWithUi(() =>
+                    {
+                        output = AllControls(console).OfType<RichTextBox>()
+                            .FirstOrDefault(control => processId.Equals(control.Tag));
+                        return output != null && output.Text.Contains("link clean");
+                    }, TimeSpan.FromSeconds(3)), "ANSI output reaches the visible console");
+                    Assert(output.Text.IndexOf(escape, StringComparison.Ordinal) < 0 &&
+                        !output.Text.Contains("[31m") && !output.Text.Contains("]8;;"),
+                        "visible console text contains no raw ANSI control fragments");
+
+                    output.Select(output.Text.IndexOf("red", StringComparison.Ordinal), 3);
+                    Equal(Color.FromArgb(197, 15, 31), output.SelectionColor,
+                        "standard ANSI red is rendered with the terminal palette");
+                    output.Select(output.Text.IndexOf("bold cyan", StringComparison.Ordinal), "bold cyan".Length);
+                    Assert(output.SelectionFont != null && output.SelectionFont.Bold,
+                        "ANSI bold is rendered as a RichTextBox font style");
+                    Equal(Color.FromArgb(58, 150, 221), output.SelectionColor,
+                        "standard ANSI cyan is rendered with the terminal palette");
+                    output.Select(output.Text.IndexOf("indexed", StringComparison.Ordinal), "indexed".Length);
+                    Equal(Color.FromArgb(255, 95, 0), output.SelectionColor,
+                        "ANSI 256-color output is rendered");
+                    output.Select(output.Text.IndexOf("truecolor", StringComparison.Ordinal), "truecolor".Length);
+                    Equal(Color.FromArgb(12, 34, 56), output.SelectionColor,
+                        "ANSI true-color output is rendered");
+
+                    var tabs = FindControl<TerminalTabStrip>(console);
+                    var encodingMenu = tabs.ContextMenuStrip.Items.OfType<ToolStripMenuItem>()
+                        .Single(item => item.Text == text["Console.Encoding"]);
+                    encodingMenu.DropDownItems.OfType<ToolStripMenuItem>()
+                        .Single(item => item.Text == text["Script.Encoding.Utf8"]).PerformClick();
+                    Assert(output.Text.Contains("red plain") && output.Text.IndexOf(escape,
+                        StringComparison.Ordinal) < 0,
+                        "history remains ANSI-free after an encoding-triggered redraw");
+                    output.Select(output.Text.IndexOf("red", StringComparison.Ordinal), 3);
+                    Equal(Color.FromArgb(197, 15, 31), output.SelectionColor,
+                        "ANSI colors survive a complete history redraw");
+
+                    string logPath = null;
+                    Assert(WaitWithUi(() =>
+                    {
+                        logPath = Directory.Exists(logDirectory)
+                            ? Directory.GetFiles(logDirectory, "*.log").SingleOrDefault()
+                            : null;
+                        return logPath != null && ReadSharedText(logPath).Contains("link clean");
+                    }, TimeSpan.FromSeconds(3)), "automatic console recording receives ANSI output");
+                    var recorded = ReadSharedText(logPath);
+                    Assert(recorded.IndexOf(escape, StringComparison.Ordinal) < 0 &&
+                        !recorded.Contains("[31m") && recorded.Contains("red plain"),
+                        "automatic console logs contain plain text without ANSI sequences");
+                }
+            });
+        }
+
         private static void TestConsoleSearchAndScrollLock()
         {
             WithTemporaryDirectory(directory =>
@@ -2012,7 +2144,7 @@ namespace CmdsManager.Tests
                 {
                     var formHandle = form.Handle;
                     Assert(formHandle != IntPtr.Zero, "main form handle is created for queued UI updates");
-                    Equal("Cmds Manager 1.2.0", form.Text,
+                    Equal("Cmds Manager 1.3.0", form.Text,
                         "main window title contains the spaced product name and version");
                     var grid = FindControl<DataGridView>(form);
                     Assert(grid != null && grid.Columns.Contains("Activity"), "main grid has an activity indicator column");

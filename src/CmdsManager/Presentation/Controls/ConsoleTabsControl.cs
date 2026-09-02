@@ -34,6 +34,17 @@ namespace CmdsManager.Presentation.Controls
     {
         private const int MaxEventsPerTick = 50000;
         private static readonly Color DefaultConsoleBackground = Color.FromArgb(28, 28, 28);
+        private static readonly Color[] AnsiBaseColors =
+        {
+            Color.FromArgb(12, 12, 12), Color.FromArgb(197, 15, 31),
+            Color.FromArgb(19, 161, 14), Color.FromArgb(193, 156, 0),
+            Color.FromArgb(0, 55, 218), Color.FromArgb(136, 23, 152),
+            Color.FromArgb(58, 150, 221), Color.FromArgb(204, 204, 204),
+            Color.FromArgb(118, 118, 118), Color.FromArgb(231, 72, 86),
+            Color.FromArgb(22, 198, 12), Color.FromArgb(249, 241, 165),
+            Color.FromArgb(59, 120, 255), Color.FromArgb(180, 0, 158),
+            Color.FromArgb(97, 214, 214), Color.FromArgb(242, 242, 242)
+        };
 
         private enum ConsoleEventKind
         {
@@ -54,6 +65,39 @@ namespace CmdsManager.Presentation.Controls
             internal byte[] RawBytes { get; set; }
             internal string OriginalText { get; set; }
             internal bool IsError { get; set; }
+            internal AnsiTextStyle AnsiStyleBefore { get; set; }
+        }
+
+        private sealed class ConsoleRenderRun
+        {
+            internal ConsoleRenderRun(AnsiTextStyle style, string text)
+            {
+                Style = style;
+                Text = new StringBuilder(text ?? string.Empty);
+            }
+
+            internal AnsiTextStyle Style { get; }
+            internal StringBuilder Text { get; }
+        }
+
+        private sealed class ConsoleRenderBatch
+        {
+            internal List<ConsoleRenderRun> Runs { get; } = new List<ConsoleRenderRun>();
+            internal int Length { get; private set; }
+
+            internal void Append(AnsiParseResult result)
+            {
+                if (result == null) return;
+                foreach (var run in result.Runs)
+                {
+                    if (run.Text.Length == 0) continue;
+                    if (Runs.Count > 0 && Runs[Runs.Count - 1].Style.Equals(run.Style))
+                        Runs[Runs.Count - 1].Text.Append(run.Text);
+                    else
+                        Runs.Add(new ConsoleRenderRun(run.Style, run.Text));
+                    Length += run.Text.Length;
+                }
+            }
         }
 
         private sealed class ConsoleSession
@@ -65,6 +109,7 @@ namespace CmdsManager.Presentation.Controls
             internal DateTime StartedAt { get; set; }
             internal ScriptOutputEncoding OutputEncoding { get; set; }
             internal Queue<ConsoleHistoryLine> History { get; } = new Queue<ConsoleHistoryLine>();
+            internal AnsiTextParser AnsiParser { get; set; } = new AnsiTextParser();
             internal int HistoryUnits { get; set; }
             internal bool WordWrap { get; set; }
             internal bool ScrollLock { get; set; }
@@ -349,7 +394,8 @@ namespace CmdsManager.Presentation.Controls
                 session.Output.ForeColor = foreground;
                 session.Output.BackColor = background;
                 if (session.DetachedWindow != null) session.DetachedWindow.BackColor = background;
-                if (TrimHistory(session, BufferUnits(settings))) RenderSession(session);
+                var trimmed = TrimHistory(session, BufferUnits(settings));
+                if (trimmed || session.History.Count > 0) RenderSession(session);
             }
 
             var previous = _consoleFont;
@@ -457,7 +503,7 @@ namespace CmdsManager.Presentation.Controls
         {
             if (IsDisposed) return;
 
-            var batches = new Dictionary<int, StringBuilder>();
+            var batches = new Dictionary<int, ConsoleRenderBatch>();
             var recordingBatches = new Dictionary<int, StringBuilder>();
             var redraw = new HashSet<int>();
             var exitedRecordings = new HashSet<int>();
@@ -495,9 +541,11 @@ namespace CmdsManager.Presentation.Controls
                 {
                     RawBytes = item.Output.RawBytes,
                     OriginalText = item.Output.Line,
-                    IsError = item.Output.IsError
+                    IsError = item.Output.IsError,
+                    AnsiStyleBefore = session.AnsiParser.Style
                 };
                 var decodedLine = DecodeLine(session, historyLine);
+                var parsedLine = session.AnsiParser.Parse(decodedLine + Environment.NewLine);
                 session.History.Enqueue(historyLine);
                 session.HistoryUnits += HistoryUnits(historyLine);
                 if (TrimHistory(session, bufferUnits)) redraw.Add(session.ProcessId);
@@ -510,17 +558,17 @@ namespace CmdsManager.Presentation.Controls
                         recordingBuilder = new StringBuilder();
                         recordingBatches[item.Output.ProcessId] = recordingBuilder;
                     }
-                    recordingBuilder.AppendLine(decodedLine);
+                    recordingBuilder.Append(parsedLine.PlainText);
                 }
 
                 if (redraw.Contains(session.ProcessId)) continue;
-                StringBuilder builder;
+                ConsoleRenderBatch builder;
                 if (!batches.TryGetValue(item.Output.ProcessId, out builder))
                 {
-                    builder = new StringBuilder();
+                    builder = new ConsoleRenderBatch();
                     batches[item.Output.ProcessId] = builder;
                 }
-                builder.AppendLine(decodedLine);
+                builder.Append(parsedLine);
             }
 
             foreach (var processId in redraw)
@@ -532,7 +580,7 @@ namespace CmdsManager.Presentation.Controls
             {
                 if (redraw.Contains(batch.Key)) continue;
                 ConsoleSession session;
-                if (_sessions.TryGetValue(batch.Key, out session)) AppendBatch(session, batch.Value.ToString());
+                if (_sessions.TryGetValue(batch.Key, out session)) AppendBatch(session, batch.Value);
             }
             foreach (var batch in recordingBatches)
             {
@@ -643,12 +691,16 @@ namespace CmdsManager.Presentation.Controls
             var firstVisibleLine = preserveScroll ? FirstVisibleLine(output) : 0;
             var selectionStart = output.SelectionStart;
             var selectionLength = output.SelectionLength;
-            var builder = new StringBuilder(Math.Min(maximumUnits, Math.Max(0, session.HistoryUnits)));
-            foreach (var line in session.History) builder.AppendLine(DecodeLine(session, line));
-            var text = builder.ToString();
-            if (text.Length > maximumUnits)
-                text = text.Substring(text.Length - Math.Max(1, maximumUnits * 3 / 4));
-            output.Text = text;
+            var parser = session.History.Count > 0
+                ? new AnsiTextParser(session.History.Peek().AnsiStyleBefore)
+                : new AnsiTextParser(session.AnsiParser.Style);
+            var batch = new ConsoleRenderBatch();
+            foreach (var line in session.History)
+                batch.Append(parser.Parse(DecodeLine(session, line) + Environment.NewLine));
+            session.AnsiParser = parser;
+            var skip = Math.Max(0, batch.Length - maximumUnits);
+            output.Clear();
+            AppendStyledRuns(output, batch, skip);
             if (preserveScroll) RestoreScroll(output, firstVisibleLine, selectionStart, selectionLength);
             else
             {
@@ -658,16 +710,16 @@ namespace CmdsManager.Presentation.Controls
             }
         }
 
-        private static void AppendBatch(ConsoleSession session, string text)
+        private void AppendBatch(ConsoleSession session, ConsoleRenderBatch batch)
         {
-            if (text.Length == 0) return;
+            if (batch == null || batch.Length == 0) return;
             var output = session.Output;
             var wasAtEnd = output.SelectionStart >= output.TextLength - 1;
             var preserveScroll = session.ScrollLock && output.IsHandleCreated;
             var firstVisibleLine = preserveScroll ? FirstVisibleLine(output) : 0;
             var selectionStart = output.SelectionStart;
             var selectionLength = output.SelectionLength;
-            output.AppendText(text);
+            AppendStyledRuns(output, batch, 0);
             if (preserveScroll)
             {
                 RestoreScroll(output, firstVisibleLine, selectionStart, selectionLength);
@@ -678,6 +730,113 @@ namespace CmdsManager.Presentation.Controls
                 output.SelectionLength = 0;
                 output.ScrollToCaret();
             }
+        }
+
+        private void AppendStyledRuns(RichTextBox output, ConsoleRenderBatch batch, int skipCharacters)
+        {
+            var fonts = new Dictionary<FontStyle, Font>();
+            try
+            {
+                foreach (var run in batch.Runs)
+                {
+                    var value = run.Text.ToString();
+                    if (skipCharacters >= value.Length)
+                    {
+                        skipCharacters -= value.Length;
+                        continue;
+                    }
+                    if (skipCharacters > 0)
+                    {
+                        if (skipCharacters < value.Length && char.IsLowSurrogate(value[skipCharacters]) &&
+                            char.IsHighSurrogate(value[skipCharacters - 1])) skipCharacters++;
+                        value = value.Substring(Math.Min(skipCharacters, value.Length));
+                        skipCharacters = 0;
+                    }
+                    if (value.Length == 0) continue;
+
+                    Color foreground;
+                    Color background;
+                    ResolveAnsiColors(run.Style, out foreground, out background);
+                    output.Select(output.TextLength, 0);
+                    output.SelectionColor = foreground;
+                    output.SelectionBackColor = background;
+                    output.SelectionFont = ResolveAnsiFont(output.Font, run.Style, fonts);
+                    output.AppendText(value);
+                }
+            }
+            finally
+            {
+                foreach (var font in fonts.Values) font.Dispose();
+            }
+
+            output.Select(output.TextLength, 0);
+            output.SelectionColor = _consoleForeground;
+            output.SelectionBackColor = _consoleBackground;
+            output.SelectionFont = output.Font;
+        }
+
+        private void ResolveAnsiColors(AnsiTextStyle style, out Color foreground, out Color background)
+        {
+            foreground = ResolveAnsiColor(style.Foreground, _consoleForeground);
+            background = ResolveAnsiColor(style.Background, _consoleBackground);
+            if (style.Inverse)
+            {
+                var swap = foreground;
+                foreground = background;
+                background = swap;
+            }
+            if (style.Concealed) foreground = background;
+            else if (style.Dim) foreground = BlendColor(foreground, background, 55);
+        }
+
+        private static Color ResolveAnsiColor(AnsiColor color, Color defaultColor)
+        {
+            if (color.Kind == AnsiColorKind.Default) return defaultColor;
+            if (color.Kind == AnsiColorKind.Rgb) return Color.FromArgb(color.Red, color.Green, color.Blue);
+            var index = Math.Max(0, Math.Min(255, color.Index));
+            if (index < AnsiBaseColors.Length) return AnsiBaseColors[index];
+            if (index >= 232)
+            {
+                var level = 8 + (index - 232) * 10;
+                return Color.FromArgb(level, level, level);
+            }
+
+            var cube = index - 16;
+            var levels = new[] { 0, 95, 135, 175, 215, 255 };
+            return Color.FromArgb(levels[cube / 36], levels[(cube / 6) % 6], levels[cube % 6]);
+        }
+
+        private static Font ResolveAnsiFont(Font baseFont, AnsiTextStyle style,
+            IDictionary<FontStyle, Font> cache)
+        {
+            var targetStyle = baseFont.Style;
+            if (style.Bold) targetStyle |= FontStyle.Bold;
+            if (style.Italic) targetStyle |= FontStyle.Italic;
+            if (style.Underline) targetStyle |= FontStyle.Underline;
+            if (style.Strikethrough) targetStyle |= FontStyle.Strikeout;
+            if (targetStyle == baseFont.Style) return baseFont;
+            Font result;
+            if (cache.TryGetValue(targetStyle, out result)) return result;
+            try
+            {
+                result = new Font(baseFont, targetStyle);
+                cache[targetStyle] = result;
+                return result;
+            }
+            catch (ArgumentException)
+            {
+                return baseFont;
+            }
+        }
+
+        private static Color BlendColor(Color foreground, Color background, int foregroundPercent)
+        {
+            foregroundPercent = Math.Max(0, Math.Min(100, foregroundPercent));
+            var backgroundPercent = 100 - foregroundPercent;
+            return Color.FromArgb(
+                (foreground.R * foregroundPercent + background.R * backgroundPercent) / 100,
+                (foreground.G * foregroundPercent + background.G * backgroundPercent) / 100,
+                (foreground.B * foregroundPercent + background.B * backgroundPercent) / 100);
         }
 
         private static int FirstVisibleLine(RichTextBox output)
@@ -819,10 +978,11 @@ namespace CmdsManager.Presentation.Controls
                 session.CustomFont = replacement;
                 session.Output.Font = replacement;
                 previous?.Dispose();
+                if (session.History.Count > 0) RenderSession(session);
             }
         }
 
-        private static void ChangeFontSize(ConsoleSession session, float delta)
+        private void ChangeFontSize(ConsoleSession session, float delta)
         {
             if (session == null) return;
             var size = Math.Max(6f, Math.Min(48f, session.Output.Font.SizeInPoints + delta));
@@ -841,6 +1001,7 @@ namespace CmdsManager.Presentation.Controls
             session.CustomFont = replacement;
             session.Output.Font = replacement;
             previous?.Dispose();
+            if (session.History.Count > 0) RenderSession(session);
         }
 
         private void ResetFont(ConsoleSession session)
@@ -850,6 +1011,7 @@ namespace CmdsManager.Presentation.Controls
             session.CustomFont = null;
             session.Output.Font = _consoleFont;
             previous?.Dispose();
+            if (session.History.Count > 0) RenderSession(session);
         }
 
         private void ChooseEncoding(object sender, EventArgs args)

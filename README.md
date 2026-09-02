@@ -19,7 +19,7 @@ maintained by [iMiKED from 4PDA](https://4pda.to/forum/index.php?showuser=101794
 Cmds Manager is a lightweight Windows tray application for organizing, running,
 monitoring, and stopping local automation scripts. It keeps a searchable script
 catalog in a portable INI file and presents captured output in a modern tabbed
-console workspace. The current source version is 1.2.0.
+console workspace. The current source version is 1.3.0.
 
 The application is built with C# and Windows Forms for .NET Framework 4.8. The
 release contains one production executable and does not bundle PowerShell, .NET,
@@ -78,6 +78,8 @@ If you like Cmds Manager or it saves you time, you can support the author:
 - Configure the displayed history buffer size for every console
 - Decode UTF-8, Windows-1251, OEM Windows, UTF-16 LE, or mixed output in Auto mode
 - Re-decode already captured bytes after changing a tab's encoding
+- Interpret ANSI SGR styles including standard, bright, 256-color, and true-color
+  output while keeping control sequences out of search, copying, logs, and exports
 - Search the active console, navigate matches, and control scrolling with
   configurable hotkeys (`Ctrl+F`, `F3`, `Shift+F3`, and `Scroll Lock` by default)
 - Record each console to a dedicated UTF-8 file automatically or on demand;
@@ -216,7 +218,7 @@ To compile and package without running tests:
 For release validation, the expected tag can be supplied explicitly:
 
 ```powershell
-.\build.ps1 -ExpectedVersion 1.2.0
+.\build.ps1 -ExpectedVersion 1.3.0
 ```
 
 The command fails when the tag and `AssemblyInformationalVersion` differ.

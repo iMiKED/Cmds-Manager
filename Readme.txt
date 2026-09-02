@@ -1,4 +1,4 @@
-CMDS MANAGER 1.2.0
+CMDS MANAGER 1.3.0
 ==================
 
 Website: https://github.com/iMiKED/cmds-manager
@@ -96,6 +96,8 @@ unless the selected folder allows the application to update its INI and logs.
 - select an individual font and output encoding for the active console tab;
 - persist Word Wrap per script and inherit it in generated child tabs;
 - decode mixed UTF-8, Windows-1251, and Windows OEM output in Auto mode;
+- render ANSI SGR colors and text styles while removing terminal control codes
+  from searchable text, copied text, exports, and logs;
 - configure console and tab text colors, background colors, and opacity;
 - use System, Light, or Dark Fluent Compact application themes;
 - switch between English and Russian interface languages stored in the INI;
@@ -133,6 +135,13 @@ choices are Utf8, Oem, Windows1251, and Utf16LittleEndian.
 
 Changing the active tab encoding re-decodes the stored raw output history, so
 text already displayed in the tab is corrected as well.
+
+ANSI SGR output is rendered directly in the console. Cmds Manager supports
+standard and bright colors, 256-color and true-color values, bold, dim, italic,
+underline, reverse, conceal, and strikethrough styles. Other CSI, OSC, and
+terminal control sequences are removed instead of being displayed as text.
+Search, copying, console recording, application output logging, and TXT export
+use the resulting plain text without escape sequences.
 
 
 7. LOGS AND PRIVACY
@@ -178,6 +187,15 @@ https://github.com/iMiKED/cmds-manager?tab=readme-ov-file#support-the-project
 ------------------
 
 The history below is derived from the Git commits of the application.
+
+1.3.0 - 03.09.2026
+- Added stateful ANSI/SGR rendering for standard and bright terminal colors,
+  256-color values, true color, and common text styles;
+- removed CSI, OSC, and other terminal control sequences from visible console
+  text, search, copying, TXT exports, console recordings, and application logs;
+- preserved ANSI state between output lines and across buffered-history redraws,
+  output-encoding changes, console font changes, and appearance updates;
+- retained Unicode symbols such as ✨, 🚀, →, and ➜ without replacement.
 
 1.2.0 - 29.08.2026
 - Added nested folders while retaining the existing Fluent table columns;
@@ -777,6 +795,8 @@ Files, если выбранная папка не позволяет обнов
 - индивидуальный шрифт и кодировка для активной вкладки консоли;
 - сохранение Word Wrap для каждого скрипта и наследование в дочерних вкладках;
 - декодирование смешанного вывода UTF-8, Windows-1251 и Windows OEM в режиме Auto;
+- отображение цветов и оформления ANSI SGR с удалением управляющих кодов из
+  поиска, копирования, экспорта и журналов;
 - настройка цветов текста и фона консоли и вкладок, а также непрозрачности;
 - системная, светлая и тёмная темы Fluent Compact;
 - переключение русского и английского интерфейса со строками в INI;
@@ -815,6 +835,13 @@ OutputEncoding=Auto сначала проверяет каждую перехв�
 
 При изменении кодировки активной вкладки сохранённая история сырых байтов
 декодируется повторно, поэтому исправляется и уже показанный текст.
+
+Последовательности ANSI SGR отображаются непосредственно в консоли. Cmds Manager
+поддерживает стандартные и яркие цвета, палитру 256 цветов, true color, жирность,
+приглушённый цвет, курсив, подчёркивание, инверсию, скрытый и зачёркнутый текст.
+Остальные последовательности CSI, OSC и управляющие команды терминала удаляются,
+а не выводятся как обычный текст. Поиск, копирование, запись консоли, журнал
+вывода приложения и экспорт TXT используют очищенный текст без escape-кодов.
 
 
 7. ЖУРНАЛЫ И КОНФИДЕНЦИАЛЬНОСТЬ
@@ -860,6 +887,15 @@ https://github.com/iMiKED/cmds-manager?tab=readme-ov-file#support-the-project
 -----------------
 
 История составлена по Git-коммитам приложения.
+
+1.3.0 — 03.09.2026
+- Добавлена обработка ANSI/SGR с сохранением состояния: стандартные и яркие
+  цвета терминала, палитра 256 цветов, true color и основные стили текста;
+- последовательности CSI, OSC и другие управляющие команды удаляются из
+  видимой консоли, поиска, копирования, TXT, записей консоли и журнала приложения;
+- состояние ANSI сохраняется между строками, при перерисовке ограниченной
+  истории, смене кодировки, шрифта и параметров оформления консоли;
+- Unicode-символы ✨, 🚀, → и ➜ остаются без изменений.
 
 1.2.0 — 29.08.2026
 - Добавлены вложенные папки с сохранением всех столбцов Fluent-таблицы;
