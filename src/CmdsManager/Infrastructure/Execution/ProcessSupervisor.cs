@@ -267,7 +267,7 @@ namespace CmdsManager.Infrastructure.Execution
                         if (_logScriptOutput())
                         {
                             _log.Information("Script '" + SafeName(session.Script.Name) + "' " +
-                                (isError ? "stderr" : "stdout") + ": " + line.Text);
+                                (isError ? "stderr" : "stdout") + ": " + AnsiTextParser.Strip(line.Text));
                         }
                     }
                 }
