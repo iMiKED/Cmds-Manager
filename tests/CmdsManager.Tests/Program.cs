@@ -40,6 +40,7 @@ namespace CmdsManager.Tests
             Run("Compact localized dialogs", TestCompactLocalizedDialogs);
             Run("Fluent folder tree and drag targets", TestFolderTreeUi);
             Run("Batched console output", TestBatchedConsoleOutput);
+            Run("Console tab dragging and wheel scrolling", TestConsoleTabNavigation);
             Run("ANSI console rendering", TestAnsiConsoleRendering);
             Run("Console search and scroll lock", TestConsoleSearchAndScrollLock);
             Run("Console recording and limits", TestConsoleRecording);
@@ -513,7 +514,7 @@ namespace CmdsManager.Tests
                 @"..\..\..\..\Readme.txt"));
             Assert(File.Exists(readmePath), "release Readme.txt exists at the repository root");
             var guide = File.ReadAllText(readmePath, Encoding.UTF8);
-            Assert(guide.StartsWith("CMDS MANAGER 1.3.0", StringComparison.Ordinal),
+            Assert(guide.StartsWith("CMDS MANAGER 1.4.0", StringComparison.Ordinal),
                 "user guide identifies the stable release");
             foreach (var heading in new[]
             {
@@ -527,7 +528,7 @@ namespace CmdsManager.Tests
 
             foreach (var version in new[]
             {
-                "1.3.0", "1.2.0", "1.1.6", "1.1.5", "1.1.4", "1.1.3", "1.1.2", "1.1.1", "1.1.0", "1.0.0", "0.6.6", "0.6.5", "0.6.4", "0.6.3", "0.6.2", "0.6.1", "0.6.0",
+                "1.4.0", "1.3.0", "1.2.0", "1.1.6", "1.1.5", "1.1.4", "1.1.3", "1.1.2", "1.1.1", "1.1.0", "1.0.0", "0.6.6", "0.6.5", "0.6.4", "0.6.3", "0.6.2", "0.6.1", "0.6.0",
                 "0.5.1", "0.5.0", "0.4.2", "0.4.1", "0.4.0", "0.3.0", "0.2.1", "0.2.0", "0.1.0-dev"
             })
             {
@@ -1342,7 +1343,7 @@ namespace CmdsManager.Tests
                         "embedded 128 px PNG icon frame is decoded without pixel corruption");
                     var aboutTitle = AllControls(about).OfType<Label>().First(control => control.Text == "Cmds Manager");
                     var aboutVersion = AllControls(about).OfType<Label>().First(control => control.Text.StartsWith("Version ", StringComparison.Ordinal));
-                    Equal("Version 1.3.0", aboutVersion.Text, "About contains the stable release version");
+                    Equal("Version 1.4.0", aboutVersion.Text, "About contains the stable release version");
                     var aboutBuild = AllControls(about).OfType<Label>()
                         .First(control => control.Text.StartsWith("Built on: ", StringComparison.Ordinal));
                     DateTime parsedBuildTimestamp;
@@ -1797,6 +1798,205 @@ namespace CmdsManager.Tests
             });
         }
 
+        private static void TestConsoleTabNavigation()
+        {
+            using (var tabs = new TerminalTabStrip { Size = new Size(640, 44) })
+            {
+                tabs.CreateControl();
+                for (var key = 1; key <= 4; key++) tabs.AddTab(key, "Tab " + key, "Process " + key, key != 2);
+                var selectionEvents = 0;
+                var closeEvents = 0;
+                tabs.SelectedTabChanged += (sender, args) => selectionEvents++;
+                tabs.CloseRequested += (sender, args) => closeEvents++;
+                var first = new Point(tabs.GetTabBounds(0).Left + 40, 20);
+                var last = new Point(tabs.GetTabBounds(3).Right - 20, 20);
+
+                TabMouse(tabs, "OnMouseDown", MouseButtons.Left, first);
+                TabMouse(tabs, "OnMouseMove", MouseButtons.Left, new Point(first.X + 1, first.Y));
+                TabMouse(tabs, "OnMouseUp", MouseButtons.Left, first);
+                Equal("1,2,3,4", TabKeys(tabs), "a click with minor movement does not reorder tabs");
+
+                TabMouse(tabs, "OnMouseDown", MouseButtons.Left, first);
+                TabMouse(tabs, "OnMouseMove", MouseButtons.Left, last);
+                Equal("1,2,3,4", TabKeys(tabs), "drag feedback does not repeatedly rebuild the tab order");
+                using (var image = new Bitmap(tabs.Width, tabs.Height))
+                    tabs.DrawToBitmap(image, tabs.ClientRectangle);
+                TabMouse(tabs, "OnMouseUp", MouseButtons.Left, last);
+                Equal("2,3,4,1", TabKeys(tabs), "dragging the first tab past the last moves it to the end");
+                Equal(1, tabs.SelectedKey, "the same process remains selected after reordering");
+                Equal(0, selectionEvents, "reordering the selected tab does not emit a false selection change");
+                Equal(0, closeEvents, "dragging over close glyphs does not stop any process");
+                Assert(!tabs.IsTabRunning(0) && tabs.IsTabRunning(3), "process indicators move with their tabs");
+
+                TabMouse(tabs, "OnMouseDown", MouseButtons.Left, new Point(tabs.GetTabBounds(3).Left + 40, 20));
+                TabMouse(tabs, "OnMouseMove", MouseButtons.Left, first);
+                TabMouse(tabs, "OnMouseUp", MouseButtons.Left, first);
+                Equal("1,2,3,4", TabKeys(tabs), "dragging back to the beginning restores the visual order");
+
+                TabMouse(tabs, "OnMouseDown", MouseButtons.Left, first);
+                TabMouse(tabs, "OnMouseMove", MouseButtons.Left, last);
+                var escape = Message.Create(tabs.Handle, 0x0100, new IntPtr((int)Keys.Escape), IntPtr.Zero);
+                var cancelled = (bool)typeof(TerminalTabStrip).GetMethod("ProcessCmdKey",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                    .Invoke(tabs, new object[] { escape, Keys.Escape });
+                TabMouse(tabs, "OnMouseUp", MouseButtons.Left, last);
+                Assert(cancelled && !tabs.Capture, "Escape cancels a drag and releases mouse capture");
+                Equal("1,2,3,4", TabKeys(tabs), "Escape preserves the original order");
+
+                TabMouse(tabs, "OnMouseDown", MouseButtons.Left, first);
+                TabMouse(tabs, "OnMouseMove", MouseButtons.Left, last);
+                tabs.Capture = false;
+                TabMouse(tabs, "OnMouseUp", MouseButtons.Left, last);
+                Equal("1,2,3,4", TabKeys(tabs), "losing mouse capture safely cancels a drag");
+                TabMouse(tabs, "OnMouseDown", MouseButtons.Left, first);
+                TabMouse(tabs, "OnMouseMove", MouseButtons.Left, last);
+                TabMouse(tabs, "OnMouseUp", MouseButtons.Left, new Point(last.X, tabs.Height + 10));
+                Equal("1,2,3,4", TabKeys(tabs), "dropping outside the strip preserves the order");
+
+                TabMouse(tabs, "OnMouseDown", MouseButtons.Left, first);
+                TabMouse(tabs, "OnMouseMove", MouseButtons.Left, last);
+                tabs.RemoveTab(1);
+                TabMouse(tabs, "OnMouseUp", MouseButtons.Left, last);
+                Equal("2,3,4", TabKeys(tabs), "removing a dragged tab cancels the gesture safely");
+                Assert(!tabs.Capture, "removing a dragged tab releases capture");
+            }
+
+            using (var tabs = new TerminalTabStrip { Size = new Size(365, 44) })
+            {
+                tabs.CreateControl();
+                for (var key = 1; key <= 8; key++) tabs.AddTab(key, "Tab " + key, "Tab " + key, true);
+                var pointer = new Point(120, 20);
+                var initialLeft = tabs.GetTabBounds(0).Left;
+                TabMouse(tabs, "OnMouseWheel", MouseButtons.None, pointer, -120);
+                Equal(initialLeft - 90, tabs.GetTabBounds(0).Left, "wheel down scrolls the strip to the right");
+                Equal(1, tabs.SelectedKey, "wheel scrolling does not switch the active console");
+                tabs.UpdateTab(1, "Renamed", "New status", false);
+                Equal(initialLeft - 90, tabs.GetTabBounds(0).Left, "title/status updates retain the manual scroll offset");
+                TabMouse(tabs, "OnMouseWheel", MouseButtons.None, pointer, 120);
+                Equal(initialLeft, tabs.GetTabBounds(0).Left, "wheel up scrolls back to the left");
+                for (var step = 0; step < 8; step++) TabMouse(tabs, "OnMouseWheel", MouseButtons.None, pointer, -15);
+                Equal(initialLeft - 90, tabs.GetTabBounds(0).Left, "small wheel deltas accumulate proportionally");
+                TabMouse(tabs, "OnMouseWheel", MouseButtons.None, pointer, -240);
+                Equal(initialLeft - 270, tabs.GetTabBounds(0).Left, "multi-notch wheel messages retain their distance");
+                TabMouse(tabs, "OnMouseWheel", MouseButtons.None, pointer, -12000);
+                var rightEnd = tabs.GetTabBounds(0).Left;
+                TabMouse(tabs, "OnMouseWheel", MouseButtons.None, pointer, -12000);
+                Equal(rightEnd, tabs.GetTabBounds(0).Left, "scrolling stops at the last tab");
+                Assert(tabs.GetTabBounds(7).Right < tabs.Width - 35, "the last tab is fully visible before the overflow menu");
+                tabs.SelectTab(1);
+                Equal(initialLeft, tabs.GetTabBounds(0).Left, "explicit selection reveals a scrolled-out active tab");
+
+                var dragStart = new Point(tabs.GetTabBounds(0).Left + 40, 20);
+                var rightEdge = new Point(tabs.Width - 44, 20);
+                TabMouse(tabs, "OnMouseDown", MouseButtons.Left, dragStart);
+                TabMouse(tabs, "OnMouseMove", MouseButtons.Left, rightEdge);
+                Assert(WaitWithUi(() => tabs.GetTabBounds(0).Left < initialLeft - 80, TimeSpan.FromSeconds(2)),
+                    "holding a dragged tab at the right edge scrolls without further mouse movement");
+                var afterRightScroll = tabs.GetTabBounds(0).Left;
+                TabMouse(tabs, "OnMouseMove", MouseButtons.Left, new Point(4, 20));
+                Assert(WaitWithUi(() => tabs.GetTabBounds(0).Left > afterRightScroll, TimeSpan.FromSeconds(2)),
+                    "holding at the left edge scrolls back");
+                TabMouse(tabs, "OnMouseUp", MouseButtons.Left, new Point(4, 20));
+                Assert(!tabs.Capture, "edge scrolling stops after a drop");
+                tabs.Width = 1500;
+                Equal(initialLeft, tabs.GetTabBounds(0).Left, "widening the strip removes unnecessary scroll offset");
+            }
+
+            WithTemporaryDirectory(directory =>
+            {
+                var configuration = new ConfigurationStore(Path.Combine(directory, "CmdsManager.ini")).LoadOrCreate();
+                var state = new ConfigurationState(configuration);
+                var text = new LocalizationService(state);
+                using (var host = new Form { ClientSize = new Size(800, 300), ShowInTaskbar = false })
+                using (var console = new ConsoleTabsControl(text, () => state.Current.Application) { Dock = DockStyle.Fill })
+                {
+                    host.Controls.Add(console);
+                    host.Show();
+                    var scriptId = Guid.NewGuid();
+                    for (var pid = 9001; pid <= 9003; pid++)
+                    {
+                        console.EnqueueStarted(new ScriptInstanceEventArgs(scriptId, "Process " + pid, pid,
+                            DateTime.Now, true, null, ScriptOutputEncoding.Utf8));
+                        console.EnqueueOutput(new ScriptOutputEventArgs(scriptId, pid, "history-" + pid, false));
+                    }
+                    var tabs = FindControl<TerminalTabStrip>(console);
+                    Assert(WaitWithUi(() => tabs.TabCount == 3, TimeSpan.FromSeconds(2)), "three managed consoles are open");
+                    tabs.SelectTab(9001);
+                    var originalOutput = AllControls(console).OfType<RichTextBox>()
+                        .Single(control => 9001.Equals(control.Tag));
+                    var closeKey = -1;
+                    console.CloseRequested += (sender, args) => closeKey = args.ProcessId;
+                    var start = new Point(tabs.GetTabBounds(0).Left + 40, 20);
+                    var end = new Point(tabs.GetTabBounds(2).Right - 20, 20);
+                    // Native down/up cover WinForms capture-release ordering; move is
+                    // injected as an event so the test does not need a physical held button.
+                    NativeMethods.SendMessage(tabs.Handle, 0x0201, new IntPtr(1), PackedPoint(start));
+                    TabMouse(tabs, "OnMouseMove", MouseButtons.Left, end);
+                    NativeMethods.SendMessage(tabs.Handle, 0x0202, IntPtr.Zero, PackedPoint(end));
+                    Equal("9002,9003,9001", TabKeys(tabs), "native mouse release commits the new console order");
+                    Assert(originalOutput.Visible && originalOutput.Text.Contains("history-9001"),
+                        "the same output control and its history survive reordering");
+                    console.EnqueueOutput(new ScriptOutputEventArgs(scriptId, 9001, "after-drag", false));
+                    Assert(WaitWithUi(() => originalOutput.Text.Contains("after-drag"), TimeSpan.FromSeconds(2)),
+                        "output continues arriving in the moved console");
+                    console.SelectAdjacentTab(1);
+                    Equal(9002, tabs.SelectedKey, "next-tab navigation follows the reordered strip");
+                    tabs.SelectTab(9001);
+
+                    host.ClientSize = new Size(410, 300);
+                    var wheelPoint = tabs.PointToScreen(new Point(100, 20));
+                    originalOutput.Focus();
+                    Assert(originalOutput.Focused, "console text has focus before wheel routing");
+                    var beforeWheel = tabs.GetTabBounds(0).Left;
+                    var wheel = Message.Create(originalOutput.Handle, 0x020A,
+                        new IntPtr(120 << 16), PackedPoint(wheelPoint));
+                    Assert(System.Windows.Forms.Application.FilterMessage(ref wheel),
+                        "wheel over the strip is consumed even when addressed to the focused console");
+                    Assert(tabs.GetTabBounds(0).Left > beforeWheel && originalOutput.Focused,
+                        "routed wheel scrolls tabs without stealing text focus");
+                    Equal(9001, tabs.SelectedKey, "routed wheel preserves the selected process");
+                    var beforeHorizontal = tabs.GetTabBounds(0).Left;
+                    var horizontal = Message.Create(originalOutput.Handle, 0x020E,
+                        new IntPtr(120 << 16), PackedPoint(wheelPoint));
+                    Assert(System.Windows.Forms.Application.FilterMessage(ref horizontal), "horizontal wheel is routed too");
+                    Equal(beforeHorizontal - 90, tabs.GetTabBounds(0).Left, "positive horizontal wheel scrolls right");
+                    var consoleWheel = Message.Create(originalOutput.Handle, 0x020A,
+                        new IntPtr(-120 << 16), PackedPoint(originalOutput.PointToScreen(new Point(50, 50))));
+                    Assert(!System.Windows.Forms.Application.FilterMessage(ref consoleWheel),
+                        "wheel over console text remains available to the console");
+
+                    host.ClientSize = new Size(800, 300);
+                    Assert(console.DetachSelectedTab(), "the moved console can still detach");
+                    var detachedWindow = originalOutput.FindForm();
+                    Assert(detachedWindow != null && detachedWindow != host, "detachment preserves the moved output control");
+                    detachedWindow.Close();
+                    Assert(WaitWithUi(() => console.DetachedTabCount == 0, TimeSpan.FromSeconds(2)),
+                        "the moved console can reattach");
+                    var close = tabs.GetCloseBounds(tabs.SelectedIndex);
+                    TabMouse(tabs, "OnMouseDown", MouseButtons.Left, new Point(close.Left + 9, close.Top + 9));
+                    Equal(9001, closeKey, "closing a reordered and reattached tab targets its original PID");
+                    host.Close();
+                }
+            });
+        }
+
+        private static void TabMouse(TerminalTabStrip tabs, string method, MouseButtons button, Point point, int delta = 0)
+        {
+            typeof(TerminalTabStrip).GetMethod(method,
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                .Invoke(tabs, new object[] { new MouseEventArgs(button, 1, point.X, point.Y, delta) });
+        }
+
+        private static string TabKeys(TerminalTabStrip tabs)
+        {
+            return string.Join(",", Enumerable.Range(0, tabs.TabCount).Select(tabs.GetTabKey));
+        }
+
+        private static IntPtr PackedPoint(Point point)
+        {
+            return new IntPtr(unchecked((int)(((uint)(ushort)point.Y << 16) | (ushort)point.X)));
+        }
+
         private static void TestAnsiConsoleRendering()
         {
             const string escape = "\x1b";
@@ -2144,7 +2344,7 @@ namespace CmdsManager.Tests
                 {
                     var formHandle = form.Handle;
                     Assert(formHandle != IntPtr.Zero, "main form handle is created for queued UI updates");
-                    Equal("Cmds Manager 1.3.0", form.Text,
+                    Equal("Cmds Manager 1.4.0", form.Text,
                         "main window title contains the spaced product name and version");
                     var grid = FindControl<DataGridView>(form);
                     Assert(grid != null && grid.Columns.Contains("Activity"), "main grid has an activity indicator column");

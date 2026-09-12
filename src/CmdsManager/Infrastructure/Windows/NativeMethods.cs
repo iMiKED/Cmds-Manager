@@ -1,4 +1,5 @@
 using System;
+using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -190,6 +191,9 @@ namespace CmdsManager.Infrastructure.Windows
 
         [DllImport("user32.dll")]
         internal static extern short GetKeyState(int virtualKey);
+
+        [DllImport("user32.dll")]
+        internal static extern IntPtr WindowFromPoint(Point point);
 
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
         internal static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam);
