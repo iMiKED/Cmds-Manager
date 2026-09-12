@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
+using CmdsManager.Infrastructure.Windows;
 
 namespace CmdsManager.Presentation.Controls
 {
@@ -16,7 +17,7 @@ namespace CmdsManager.Presentation.Controls
         public int Key { get; }
     }
 
-    public sealed class TerminalTabStrip : Control
+    public sealed class TerminalTabStrip : Control, IMessageFilter
     {
         private const int TopMargin = 4;
         private const int LeftMargin = 2;
@@ -26,6 +27,12 @@ namespace CmdsManager.Presentation.Controls
         private const int MaximumTabWidth = 240;
         private const int OverflowAreaWidth = 40;
         private const int CloseSize = 18;
+        private const int WheelDelta = 120;
+        private const int WheelScrollPixels = 90;
+        private const int DragScrollEdge = 28;
+        private const int DragScrollPixels = 18;
+        private const int WmMouseWheel = 0x020A;
+        private const int WmMouseHorizontalWheel = 0x020E;
 
         private sealed class TabItem
         {
@@ -46,6 +53,7 @@ namespace CmdsManager.Presentation.Controls
             ReshowDelay = 100
         };
         private readonly ContextMenuStrip _overflowMenu = new ContextMenuStrip();
+        private readonly Timer _dragScrollTimer = new Timer { Interval = 50 };
         private readonly Font _ownedFont = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
         private int _selectedIndex = -1;
         private int _hotIndex = -1;
@@ -54,6 +62,13 @@ namespace CmdsManager.Presentation.Controls
         private int _scrollOffset;
         private bool _showOverflow;
         private bool _hotOverflow;
+        private int _verticalWheelRemainder;
+        private int _horizontalWheelRemainder;
+        private TabItem _dragItem;
+        private Rectangle _dragThreshold;
+        private Point _dragPoint;
+        private bool _dragging;
+        private int _dropIndex = -1;
 
         public TerminalTabStrip()
         {
@@ -72,6 +87,7 @@ namespace CmdsManager.Presentation.Controls
             InactiveTextColor = Color.FromArgb(38, 43, 50);
             RunningColor = Color.FromArgb(39, 190, 112);
             StoppedColor = Color.FromArgb(137, 146, 157);
+            _dragScrollTimer.Tick += HandleDragScroll;
         }
 
         public event EventHandler<TerminalTabEventArgs> SelectedTabChanged;
@@ -135,7 +151,8 @@ namespace CmdsManager.Presentation.Controls
             var selectionChanged = _selectedIndex < 0;
             if (selectionChanged) _selectedIndex = 0;
             RecalculateLayout();
-            EnsureSelectedVisible();
+            if (selectionChanged) EnsureSelectedVisible();
+            if (_dragging) UpdateDragLocation(_dragPoint);
             Invalidate();
             if (selectionChanged) RaiseSelectedTabChanged();
         }
@@ -149,7 +166,8 @@ namespace CmdsManager.Presentation.Controls
             item.ToolTipText = toolTipText ?? string.Empty;
             item.IsRunning = isRunning;
             RecalculateLayout();
-            EnsureSelectedVisible();
+            SetToolTipIndex(-1);
+            if (_dragging) UpdateDragLocation(_dragPoint);
             Invalidate();
         }
 
@@ -157,6 +175,7 @@ namespace CmdsManager.Presentation.Controls
         {
             var index = IndexOfKey(key);
             if (index < 0) return false;
+            EndDrag();
             var previousSelectedKey = SelectedKey;
             _items.RemoveAt(index);
             if (_items.Count == 0)
@@ -177,7 +196,7 @@ namespace CmdsManager.Presentation.Controls
             _hotCloseIndex = -1;
             SetToolTipIndex(-1);
             RecalculateLayout();
-            EnsureSelectedVisible();
+            if (previousSelectedKey != SelectedKey) EnsureSelectedVisible();
             Invalidate();
             if (previousSelectedKey != SelectedKey) RaiseSelectedTabChanged();
             return true;
@@ -194,6 +213,7 @@ namespace CmdsManager.Presentation.Controls
             if (_selectedIndex == index)
             {
                 EnsureSelectedVisible();
+                Invalidate();
                 return true;
             }
 
@@ -208,11 +228,58 @@ namespace CmdsManager.Presentation.Controls
         {
             if (disposing)
             {
+                EndDrag();
+                _dragScrollTimer.Dispose();
                 _toolTip.Dispose();
                 _overflowMenu.Dispose();
                 _ownedFont.Dispose();
             }
             base.Dispose(disposing);
+        }
+
+        protected override void OnHandleCreated(EventArgs args)
+        {
+            base.OnHandleCreated(args);
+            System.Windows.Forms.Application.AddMessageFilter(this);
+        }
+
+        protected override void OnHandleDestroyed(EventArgs args)
+        {
+            System.Windows.Forms.Application.RemoveMessageFilter(this);
+            EndDrag();
+            base.OnHandleDestroyed(args);
+        }
+
+        bool IMessageFilter.PreFilterMessage(ref Message message)
+        {
+            if (message.Msg != WmMouseWheel && message.Msg != WmMouseHorizontalWheel) return false;
+            if (!IsHandleCreated || IsDisposed || !Visible || !Enabled) return false;
+
+            // Wheel messages can target the focused console. Route only those over
+            // this strip; WindowFromPoint also excludes menus and overlapping windows.
+            // Signed coordinates support monitors to the left/above the primary screen.
+            var packed = message.LParam.ToInt64();
+            var screenPoint = new Point(unchecked((short)packed), unchecked((short)(packed >> 16)));
+            if (!ClientRectangle.Contains(PointToClient(screenPoint)) ||
+                NativeMethods.WindowFromPoint(screenPoint) != Handle) return false;
+
+            var delta = unchecked((short)(message.WParam.ToInt64() >> 16));
+            ScrollWheel(delta, message.Msg == WmMouseHorizontalWheel, PointToClient(screenPoint));
+            return true;
+        }
+
+        protected override void WndProc(ref Message message)
+        {
+            if (message.Msg == WmMouseHorizontalWheel)
+            {
+                var packed = message.LParam.ToInt64();
+                var point = PointToClient(new Point(unchecked((short)packed), unchecked((short)(packed >> 16))));
+                if (ClientRectangle.Contains(point))
+                    ScrollWheel(unchecked((short)(message.WParam.ToInt64() >> 16)), true, point);
+                message.Result = IntPtr.Zero;
+                return;
+            }
+            base.WndProc(ref message);
         }
 
         protected override void OnFontChanged(EventArgs args)
@@ -227,6 +294,7 @@ namespace CmdsManager.Presentation.Controls
             base.OnResize(args);
             RecalculateLayout();
             EnsureSelectedVisible();
+            if (_dragging) UpdateDragLocation(_dragPoint);
             Invalidate();
         }
 
@@ -245,14 +313,14 @@ namespace CmdsManager.Presentation.Controls
             args.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             args.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
 
-            var viewportRight = _showOverflow ? OverflowBounds.Left - 2 : ClientSize.Width;
             var state = args.Graphics.Save();
-            args.Graphics.SetClip(new Rectangle(0, 0, Math.Max(0, viewportRight), ClientSize.Height));
+            args.Graphics.SetClip(new Rectangle(0, 0, ViewportRight, ClientSize.Height));
             for (var index = 0; index < _items.Count; index++)
             {
                 if (index != _selectedIndex) DrawTab(args.Graphics, index);
             }
             if (_selectedIndex >= 0) DrawTab(args.Graphics, _selectedIndex);
+            DrawDropMarker(args.Graphics);
             args.Graphics.Restore(state);
 
             if (_showOverflow) DrawOverflowButton(args.Graphics);
@@ -263,6 +331,7 @@ namespace CmdsManager.Presentation.Controls
         protected override void OnMouseDown(MouseEventArgs args)
         {
             base.OnMouseDown(args);
+            EndDrag();
             Focus();
             if (_showOverflow && OverflowBounds.Contains(args.Location))
             {
@@ -272,24 +341,84 @@ namespace CmdsManager.Presentation.Controls
 
             var index = HitTest(args.Location);
             if (index < 0) return;
-            var closeClicked = _items[index].CloseBounds.Contains(args.Location);
+            var item = _items[index];
+            var closeClicked = item.CloseBounds.Contains(args.Location);
             SelectIndex(index);
             if (args.Button == MouseButtons.Left && closeClicked)
-                CloseRequested?.Invoke(this, new TerminalTabEventArgs(_items[index].Key));
+            {
+                CloseRequested?.Invoke(this, new TerminalTabEventArgs(item.Key));
+                return;
+            }
+            if (args.Button != MouseButtons.Left || _items.Count < 2 || !_items.Contains(item)) return;
+
+            _dragItem = item;
+            var dragSize = SystemInformation.DragSize;
+            _dragThreshold = new Rectangle(args.X - dragSize.Width / 2,
+                args.Y - dragSize.Height / 2, dragSize.Width, dragSize.Height);
+            _dragPoint = args.Location;
+            Capture = true;
         }
 
         protected override void OnMouseMove(MouseEventArgs args)
         {
             base.OnMouseMove(args);
-            var hotOverflow = _showOverflow && OverflowBounds.Contains(args.Location);
-            var index = hotOverflow ? -1 : HitTest(args.Location);
-            var closeIndex = index >= 0 && _items[index].CloseBounds.Contains(args.Location) ? index : -1;
+            if (_dragItem != null)
+            {
+                if ((args.Button & MouseButtons.Left) == 0)
+                    EndDrag();
+                else if (_dragging || !_dragThreshold.Contains(args.Location))
+                {
+                    _dragging = true;
+                    Cursor = Cursors.SizeAll;
+                    _hotCloseIndex = -1;
+                    SetToolTipIndex(-1);
+                    UpdateDragLocation(args.Location);
+                    return;
+                }
+            }
+            UpdateHover(args.Location);
+        }
+
+        private void UpdateHover(Point location)
+        {
+            var hotOverflow = _showOverflow && OverflowBounds.Contains(location);
+            var index = hotOverflow ? -1 : HitTest(location);
+            var closeIndex = index >= 0 && _items[index].CloseBounds.Contains(location) ? index : -1;
             SetToolTipIndex(index);
             if (_hotIndex == index && _hotCloseIndex == closeIndex && _hotOverflow == hotOverflow) return;
             _hotIndex = index;
             _hotCloseIndex = closeIndex;
             _hotOverflow = hotOverflow;
             Invalidate();
+        }
+
+        protected override void OnMouseUp(MouseEventArgs args)
+        {
+            base.OnMouseUp(args);
+            if (args.Button != MouseButtons.Left) return;
+            if (_dragging)
+            {
+                UpdateDragLocation(args.Location);
+                if (_dropIndex >= 0) MoveDraggedTab();
+            }
+            EndDrag();
+            UpdateHover(args.Location);
+        }
+
+        protected override void OnMouseCaptureChanged(EventArgs args)
+        {
+            base.OnMouseCaptureChanged(args);
+            if (!Capture) EndDrag();
+        }
+
+        protected override bool ProcessCmdKey(ref Message message, Keys keyData)
+        {
+            if (_dragItem != null && keyData == Keys.Escape)
+            {
+                EndDrag();
+                return true;
+            }
+            return base.ProcessCmdKey(ref message, keyData);
         }
 
         protected override void OnMouseLeave(EventArgs args)
@@ -305,11 +434,10 @@ namespace CmdsManager.Presentation.Controls
         protected override void OnMouseWheel(MouseEventArgs args)
         {
             base.OnMouseWheel(args);
-            if (!_showOverflow) return;
-            _scrollOffset = Math.Max(0, Math.Min(MaximumScrollOffset,
-                _scrollOffset - Math.Sign(args.Delta) * 90));
-            RecalculateVisibleBounds();
-            Invalidate();
+            if (!ClientRectangle.Contains(args.Location)) return;
+            var handledArgs = args as HandledMouseEventArgs;
+            if (handledArgs != null) handledArgs.Handled = true;
+            ScrollWheel(args.Delta, false, args.Location);
         }
 
         protected override bool IsInputKey(Keys keyData)
@@ -347,12 +475,136 @@ namespace CmdsManager.Presentation.Controls
 
         private int HitTest(Point location)
         {
+            if (!ClientRectangle.Contains(location) || location.X >= ViewportRight) return -1;
+            if (_selectedIndex >= 0 && _items[_selectedIndex].Bounds.Contains(location)) return _selectedIndex;
             for (var index = _items.Count - 1; index >= 0; index--)
             {
                 if (_items[index].Bounds.Contains(location)) return index;
             }
             return -1;
         }
+
+        private void ScrollWheel(int delta, bool horizontal, Point location)
+        {
+            if (!_showOverflow || delta == 0) return;
+            var remainder = horizontal ? _horizontalWheelRemainder : _verticalWheelRemainder;
+            var amount = remainder + delta * WheelScrollPixels;
+            if (horizontal) _horizontalWheelRemainder = amount % WheelDelta;
+            else _verticalWheelRemainder = amount % WheelDelta;
+            ScrollBy((horizontal ? 1 : -1) * (amount / WheelDelta));
+            if (_dragging) UpdateDragLocation(location);
+            else UpdateHover(location);
+        }
+
+        private bool ScrollBy(int pixels)
+        {
+            var offset = Math.Max(0, Math.Min(MaximumScrollOffset, _scrollOffset + pixels));
+            if (offset == _scrollOffset) return false;
+            _scrollOffset = offset;
+            RecalculateVisibleBounds();
+            Invalidate();
+            return true;
+        }
+
+        private void UpdateDragLocation(Point location)
+        {
+            _dragPoint = location;
+            var dropIndex = -1;
+            if (ClientRectangle.Contains(location))
+            {
+                var logicalX = Math.Min(location.X, ViewportRight) + _scrollOffset;
+                dropIndex = 0;
+                foreach (var item in _items)
+                {
+                    if (item == _dragItem) continue;
+                    if (logicalX < item.LogicalBounds.Left + item.LogicalBounds.Width / 2) break;
+                    dropIndex++;
+                }
+            }
+            if (_dropIndex != dropIndex)
+            {
+                _dropIndex = dropIndex;
+                Invalidate();
+            }
+            _dragScrollTimer.Enabled = DragScrollDirection != 0;
+        }
+
+        private int DragScrollDirection
+        {
+            get
+            {
+                if (!_dragging || !_showOverflow || !ClientRectangle.Contains(_dragPoint)) return 0;
+                var edge = Math.Min(DragScrollEdge, Math.Max(1, ViewportRight / 3));
+                if (_dragPoint.X < edge && _scrollOffset > 0) return -1;
+                if (_dragPoint.X >= ViewportRight - edge && _scrollOffset < MaximumScrollOffset) return 1;
+                return 0;
+            }
+        }
+
+        private void HandleDragScroll(object sender, EventArgs args)
+        {
+            var direction = DragScrollDirection;
+            if (direction == 0 || !Capture)
+            {
+                _dragScrollTimer.Stop();
+                return;
+            }
+            ScrollBy(direction * DragScrollPixels);
+            UpdateDragLocation(_dragPoint);
+        }
+
+        private void MoveDraggedTab()
+        {
+            var oldIndex = _items.IndexOf(_dragItem);
+            if (oldIndex < 0 || oldIndex == _dropIndex) return;
+            var selectedKey = SelectedKey;
+            _items.RemoveAt(oldIndex);
+            _items.Insert(_dropIndex, _dragItem);
+            _selectedIndex = IndexOfKey(selectedKey);
+            RecalculateLayout();
+            EnsureSelectedVisible();
+        }
+
+        private void EndDrag()
+        {
+            if (_dragItem == null) return;
+            _dragItem = null;
+            _dragging = false;
+            _dropIndex = -1;
+            _dragScrollTimer.Stop();
+            Capture = false;
+            Cursor = Cursors.Default;
+            _hotIndex = -1;
+            _hotCloseIndex = -1;
+            SetToolTipIndex(-1);
+            Invalidate();
+        }
+
+        private void DrawDropMarker(Graphics graphics)
+        {
+            if (!_dragging || _dropIndex < 0 || _dropIndex == _items.IndexOf(_dragItem)) return;
+            var remainingIndex = 0;
+            var x = LeftMargin;
+            foreach (var item in _items)
+            {
+                if (item == _dragItem) continue;
+                if (remainingIndex++ == _dropIndex)
+                {
+                    x = item.Bounds.Left;
+                    break;
+                }
+                x = item.Bounds.Right;
+            }
+            x = Math.Max(2, Math.Min(ViewportRight - 3, x));
+            using (var pen = new Pen(RunningColor, 2f))
+            using (var brush = new SolidBrush(RunningColor))
+            {
+                graphics.DrawLine(pen, x, TopMargin + 3, x, ClientSize.Height - 3);
+                graphics.FillEllipse(brush, x - 3, TopMargin, 6, 6);
+            }
+        }
+
+        private int ViewportRight => Math.Max(0, _showOverflow ? OverflowBounds.Left - 2 : ClientSize.Width);
 
         private void DrawTab(Graphics graphics, int index)
         {
@@ -473,6 +725,11 @@ namespace CmdsManager.Presentation.Controls
             }
 
             _showOverflow = x + LeftMargin > ClientSize.Width;
+            if (!_showOverflow)
+            {
+                _verticalWheelRemainder = 0;
+                _horizontalWheelRemainder = 0;
+            }
             _scrollOffset = Math.Max(0, Math.Min(_scrollOffset, MaximumScrollOffset));
             RecalculateVisibleBounds();
         }
@@ -501,7 +758,7 @@ namespace CmdsManager.Presentation.Controls
 
             var logical = _items[_selectedIndex].LogicalBounds;
             var viewportLeft = LeftMargin;
-            var viewportRight = OverflowBounds.Left - 3;
+            var viewportRight = ViewportRight - 1;
             if (logical.Left - _scrollOffset < viewportLeft)
                 _scrollOffset = Math.Max(0, logical.Left - viewportLeft);
             else if (logical.Right - _scrollOffset > viewportRight)
@@ -515,7 +772,7 @@ namespace CmdsManager.Presentation.Controls
             {
                 if (!_showOverflow || _items.Count == 0) return 0;
                 var logicalRight = _items[_items.Count - 1].LogicalBounds.Right + LeftMargin;
-                return Math.Max(0, logicalRight - OverflowBounds.Left);
+                return Math.Max(0, logicalRight - ViewportRight);
             }
         }
 

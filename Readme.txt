@@ -1,4 +1,4 @@
-CMDS MANAGER 1.3.0
+CMDS MANAGER 1.4.0
 ==================
 
 Website: https://github.com/iMiKED/cmds-manager
@@ -83,6 +83,10 @@ unless the selected folder allows the application to update its INI and logs.
 - record each console to a dedicated UTF-8 log automatically or on demand,
   pause and resume recording, stop it, and enforce a per-file size limit;
 - use one neighboring console tab for every managed process instance;
+- reorder open consoles by dragging their tab labels, with an insertion marker
+  and automatic scrolling at the edges of the strip;
+- scroll an overflowing tab strip with the mouse wheel while hovering over it,
+  including when the console text has focus;
 - stop the complete process tree through Windows Job Objects;
 - stop all managed scripts when Cmds Manager exits explicitly;
 - detach a live console tab into a separate window without restarting the
@@ -110,6 +114,17 @@ unless the selected folder allows the application to update its INI and logs.
 
 Every managed launch has a separate console tab. Closing the tab of a running
 process requests that exact process to stop.
+
+Drag a tab label with the left mouse button to change the order of open consoles.
+The marker shows where the tab will be inserted on release. Hold it near either
+edge to scroll through hidden tabs. Press Esc or release outside the strip to
+cancel. Reordering keeps the same process, console history, and console settings.
+The order applies to currently open tabs and is not saved between app launches.
+
+Point at the tab strip and turn the mouse wheel to scroll left or right without
+switching the active console. Horizontal wheels and small high-resolution wheel
+movements are supported. Console text keeps its focus. Status/title updates do
+not pull the strip back to the active tab; explicitly selecting a tab reveals it.
 
 For captured CMD/BAT scripts, Cmds Manager recognizes the common START form
 that launches another .cmd or .bat through cmd /c or cmd /k. The child script
@@ -187,6 +202,14 @@ https://github.com/iMiKED/cmds-manager?tab=readme-ov-file#support-the-project
 ------------------
 
 The history below is derived from the Git commits of the application.
+
+1.4.0 - 13.09.2026
+- Added drag-and-drop ordering of open console tabs, an insertion marker,
+  edge auto-scroll, and cancellation with Esc or a drop outside the strip;
+- added mouse-wheel scrolling over the tab strip even when console text has
+  focus, including horizontal and high-resolution wheels;
+- kept the active console, process, output history, and tab settings intact
+  when reordering, and retained manual scrolling when tab status/title changes.
 
 1.3.0 - 03.09.2026
 - Added stateful ANSI/SGR rendering for standard and bright terminal colors,
@@ -782,6 +805,10 @@ Files, если выбранная папка не позволяет обнов
 - автоматическая или ручная запись каждой консоли в отдельный UTF-8-журнал с
   паузой, продолжением, остановкой и ограничением размера файла;
 - отдельная соседняя вкладка для каждого управляемого экземпляра процесса;
+- изменение порядка открытых консолей перетаскиванием ярлыков вкладок с маркером
+  вставки и автоматической прокруткой у краёв строки;
+- прокрутка не помещающихся в строку вкладок колесом мыши при наведении на них,
+  в том числе когда фокус находится в тексте консоли;
 - остановка всего дерева процессов через Windows Job Objects;
 - остановка всех управляемых скриптов при явном выходе из Cmds Manager;
 - отделение работающей вкладки в самостоятельное окно без перезапуска процесса
@@ -809,6 +836,19 @@ Files, если выбранная папка не позволяет обнов
 
 Каждый управляемый запуск получает отдельную вкладку консоли. Закрытие вкладки
 работающего процесса запрашивает остановку именно этого процесса.
+
+Чтобы изменить порядок открытых консолей, перетащите ярлык вкладки левой кнопкой
+мыши. Маркер показывает место вставки после отпускания кнопки. Задержите вкладку
+у края строки, чтобы прокрутить скрытые вкладки. Esc или отпускание кнопки за
+пределами строки отменяет перенос. Процесс, история и настройки консоли при
+переносе сохраняются. Порядок действует для открытых вкладок и не сохраняется
+между запусками приложения.
+
+Наведите указатель на строку вкладок и вращайте колесо мыши, чтобы прокрутить её
+влево или вправо без смены активной консоли. Поддерживаются горизонтальное колесо
+и мелкие движения колеса высокого разрешения. Фокус остаётся в тексте консоли.
+Обновление статуса или заголовка не возвращает строку к активной вкладке;
+явный выбор вкладки снова делает её видимой.
 
 Для CMD/BAT с перехватом вывода Cmds Manager распознаёт типовую команду START,
 запускающую другой .cmd или .bat через cmd /c либо cmd /k. Дочерний скрипт
@@ -887,6 +927,14 @@ https://github.com/iMiKED/cmds-manager?tab=readme-ov-file#support-the-project
 -----------------
 
 История составлена по Git-коммитам приложения.
+
+1.4.0 — 13.09.2026
+- Добавлены изменение порядка открытых консолей перетаскиванием вкладок,
+  маркер вставки, автопрокрутка у краёв и отмена через Esc или drop вне строки;
+- добавлена прокрутка строки вкладок колесом при фокусе в тексте консоли,
+  в том числе горизонтальным колесом и колесом высокого разрешения;
+- при переносе сохраняются активная консоль, процесс, история и настройки,
+  а обновление статуса или заголовка не сбрасывает ручную прокрутку строки.
 
 1.3.0 — 03.09.2026
 - Добавлена обработка ANSI/SGR с сохранением состояния: стандартные и яркие
