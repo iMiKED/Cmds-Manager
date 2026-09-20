@@ -28,6 +28,7 @@ namespace CmdsManager.Presentation.Forms
         private readonly FluentCheckBox _captureOutput = new FluentCheckBox();
         private readonly FluentComboBox _outputEncoding = new FluentComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
         private readonly FluentCheckBox _wordWrap = new FluentCheckBox();
+        private readonly FluentComboBox _consoleLaunchBehavior = new FluentComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
         private readonly FluentCheckBox _allowParallel = new FluentCheckBox();
         private readonly FluentCheckBox _autoStart = new FluentCheckBox();
         private readonly FluentNumericUpDown _autoStartOrder = new FluentNumericUpDown { Minimum = -100000, Maximum = 100000, Width = 58, TextAlign = HorizontalAlignment.Right };
@@ -55,7 +56,7 @@ namespace CmdsManager.Presentation.Forms
             MaximizeBox = false;
             ShowInTaskbar = false;
             FormBorderStyle = FormBorderStyle.FixedDialog;
-            ClientSize = new Size(570, 497);
+            ClientSize = new Size(570, 529);
             Icon = ApplicationResources.Icon;
 
             _enabled.Text = _text["Script.Enabled"];
@@ -77,6 +78,10 @@ namespace CmdsManager.Presentation.Forms
                 new DisplayItem<ScriptOutputEncoding>(ScriptOutputEncoding.Windows1251, _text["Script.Encoding.Windows1251"]),
                 new DisplayItem<ScriptOutputEncoding>(ScriptOutputEncoding.Utf16LittleEndian, _text["Script.Encoding.Utf16"]));
 
+            foreach (ConsoleLaunchBehavior behavior in Enum.GetValues(typeof(ConsoleLaunchBehavior)))
+                _consoleLaunchBehavior.Items.Add(new DisplayItem<ConsoleLaunchBehavior>(behavior,
+                    _text["Console.Launch." + behavior]));
+
             var content = CreateTable();
             AddRow(content, _text["Script.Name"], NameAndEnabled());
             FillFolderItems(folders, model.FolderId);
@@ -89,6 +94,7 @@ namespace CmdsManager.Presentation.Forms
             AddRow(content, _text["Script.StopPolicy"], _stopPolicy);
             AddRow(content, string.Empty, _captureOutput);
             AddRow(content, _text["Script.Encoding"], _outputEncoding);
+            AddRow(content, _text["Console.LaunchBehavior"], _consoleLaunchBehavior);
             AddRow(content, string.Empty, _wordWrap);
             AddRow(content, string.Empty, _allowParallel);
             AddRow(content, string.Empty, _autoStart);
@@ -129,6 +135,7 @@ namespace CmdsManager.Presentation.Forms
             SelectValue(_windowMode, model.Launch.WindowMode);
             SelectValue(_stopPolicy, model.Launch.StopPolicy);
             SelectValue(_outputEncoding, model.Launch.OutputEncoding);
+            SelectValue(_consoleLaunchBehavior, model.Launch.ConsoleLaunchBehavior);
             RefreshInterpreterItems(model.Launch.Interpreter);
 
             _path.TextChanged += (sender, args) => RefreshInterpreterItems(GetValue(_interpreter, ScriptInterpreter.Auto));
@@ -161,6 +168,7 @@ namespace CmdsManager.Presentation.Forms
                         CaptureOutput = _captureOutput.Checked,
                         OutputEncoding = GetValue(_outputEncoding, ScriptOutputEncoding.Auto),
                         WordWrap = _wordWrap.Checked,
+                        ConsoleLaunchBehavior = GetValue(_consoleLaunchBehavior, ConsoleLaunchBehavior.Inherit),
                         AllowParallelInstances = _allowParallel.Checked,
                         AutoStartWithApplication = _autoStart.Checked,
                         AutoStartOrder = decimal.ToInt32(_autoStartOrder.Value),
@@ -263,6 +271,7 @@ namespace CmdsManager.Presentation.Forms
             _captureOutput.Enabled = !wscript;
             _outputEncoding.Enabled = !wscript && _captureOutput.Checked;
             _wordWrap.Enabled = !wscript && _captureOutput.Checked;
+            _consoleLaunchBehavior.Enabled = !wscript && _captureOutput.Checked;
         }
 
         private static TableLayoutPanel CreateTable()

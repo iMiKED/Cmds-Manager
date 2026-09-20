@@ -59,6 +59,7 @@ namespace CmdsManager.Presentation.Forms
         };
         private readonly ComboBox _language = new FluentComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
         private readonly ComboBox _theme = new FluentComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
+        private readonly ComboBox _consoleLaunchBehavior = new FluentComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
         private readonly FluentTextBox _fontDisplay = new FluentTextBox { ReadOnly = true };
         private readonly Button _consoleTextColor = ColorButton();
         private readonly Button _consoleBackgroundColor = ColorButton();
@@ -115,6 +116,12 @@ namespace CmdsManager.Presentation.Forms
             AddFullRow(tools, _logScriptOutput);
 
             var console = CreateTable(190);
+            foreach (ConsoleLaunchBehavior behavior in Enum.GetValues(typeof(ConsoleLaunchBehavior)))
+                if (behavior != ConsoleLaunchBehavior.Inherit)
+                    _consoleLaunchBehavior.Items.Add(new DisplayItem<ConsoleLaunchBehavior>(behavior,
+                        _text["Console.Launch." + behavior]));
+            SelectValue(_consoleLaunchBehavior, source.ConsoleLaunchBehavior);
+            AddRow(console, _text["Console.LaunchBehavior"], _consoleLaunchBehavior);
             AddRow(console, _text["Settings.ConsoleBufferSize"], _consoleBufferSize);
             AddRow(console, _text["Settings.ConsoleLogMaxSize"], _consoleLogMaxSize);
             AddFullRow(console, _consoleAutoRecord);
@@ -211,6 +218,7 @@ namespace CmdsManager.Presentation.Forms
                 SettingsResult.LogRetentionDays = decimal.ToInt32(_retention.Value);
                 SettingsResult.LogScriptOutput = _logScriptOutput.Checked;
                 SettingsResult.ConsoleBufferSizeKb = decimal.ToInt32(_consoleBufferSize.Value);
+                SettingsResult.ConsoleLaunchBehavior = GetValue(_consoleLaunchBehavior, ConsoleLaunchBehavior.Reuse);
                 SettingsResult.ConsoleLogMaxSizeMb = decimal.ToInt32(_consoleLogMaxSize.Value);
                 SettingsResult.ConsoleAutoRecord = _consoleAutoRecord.Checked;
                 SettingsResult.Theme = GetValue(_theme, ApplicationTheme.System);

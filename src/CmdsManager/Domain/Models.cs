@@ -35,6 +35,14 @@ namespace CmdsManager.Domain
         Kill
     }
 
+    public enum ConsoleLaunchBehavior
+    {
+        Inherit,
+        Reuse,
+        NewKeepPrevious,
+        NewClosePrevious
+    }
+
     public enum ScriptRuntimeState
     {
         Stopped,
@@ -227,6 +235,7 @@ namespace CmdsManager.Domain
         public bool CaptureOutput { get; set; } = true;
         public ScriptOutputEncoding OutputEncoding { get; set; } = ScriptOutputEncoding.Auto;
         public bool WordWrap { get; set; }
+        public ConsoleLaunchBehavior ConsoleLaunchBehavior { get; set; } = ConsoleLaunchBehavior.Inherit;
         public bool AllowParallelInstances { get; set; }
         public bool AutoStartWithApplication { get; set; }
         public int AutoStartOrder { get; set; } = 100;
@@ -276,7 +285,7 @@ namespace CmdsManager.Domain
 
     public sealed class ApplicationSettings
     {
-        public int ConfigVersion { get; set; } = 13;
+        public int ConfigVersion { get; set; } = 14;
         public ApplicationTheme Theme { get; set; } = ApplicationTheme.System;
         public bool CloseToTray { get; set; } = true;
         public bool StartMinimized { get; set; }
@@ -310,6 +319,7 @@ namespace CmdsManager.Domain
         public float ConsoleFontSize { get; set; } = 10f;
         public int ConsolePaneHeight { get; set; } = 235;
         public int ConsoleBufferSizeKb { get; set; } = 256;
+        public ConsoleLaunchBehavior ConsoleLaunchBehavior { get; set; } = ConsoleLaunchBehavior.Reuse;
         public bool ConsoleAutoRecord { get; set; }
         public int ConsoleLogMaxSizeMb { get; set; } = 50;
         public string ConsoleForegroundColor { get; set; } = "#DCDCDC";
