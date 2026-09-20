@@ -70,6 +70,9 @@ namespace CmdsManager.Domain
 
             ValidateInterpreter(extension, script.Launch.Interpreter);
 
+            if (!Enum.IsDefined(typeof(ConsoleLaunchBehavior), script.Launch.ConsoleLaunchBehavior))
+                throw new ArgumentException("Unsupported console launch behavior.", nameof(script));
+
             if (script.Launch.Interpreter == ScriptInterpreter.WScript && script.Launch.CaptureOutput)
             {
                 throw new ArgumentException("WScript does not support output capture. Use CScript or disable capture.", nameof(script));

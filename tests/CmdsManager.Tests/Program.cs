@@ -21,7 +21,7 @@ using CmdsManager.Presentation.Theming;
 
 namespace CmdsManager.Tests
 {
-    internal static class Program
+    internal static partial class Program
     {
         private static readonly List<string> Failures = new List<string>();
 
@@ -41,6 +41,9 @@ namespace CmdsManager.Tests
             Run("Fluent folder tree and drag targets", TestFolderTreeUi);
             Run("Batched console output", TestBatchedConsoleOutput);
             Run("Console tab dragging and wheel scrolling", TestConsoleTabNavigation);
+            Run("Console launch configuration and inheritance", TestConsoleLaunchConfiguration);
+            Run("Console reuse and replacement lifecycle", TestConsoleLaunchLifecycle);
+            Run("Immediate process restart and managed child consoles", TestConsoleRestartIntegration);
             Run("ANSI console rendering", TestAnsiConsoleRendering);
             Run("Console search and scroll lock", TestConsoleSearchAndScrollLock);
             Run("Console recording and limits", TestConsoleRecording);
@@ -197,7 +200,7 @@ namespace CmdsManager.Tests
                 var legacyPath = Path.Combine(directory, "Legacy.ini");
                 File.WriteAllText(legacyPath, "[Application]\r\nConfigVersion=1\r\n", new UTF8Encoding(false));
                 var legacy = new ConfigurationStore(legacyPath).LoadOrCreate();
-                Equal(13, legacy.Application.ConfigVersion, "legacy configuration version is upgraded");
+                Equal(14, legacy.Application.ConfigVersion, "legacy configuration version is upgraded");
                 Assert(File.ReadAllText(legacyPath, Encoding.UTF8).Contains("[Strings.ru]"), "legacy configuration receives localization strings");
 
                 var version2Path = Path.Combine(directory, "Version2.ini");
@@ -207,7 +210,7 @@ namespace CmdsManager.Tests
                     "[Strings.ru]\r\nScript.Encoding.Auto=Авто (OEM Windows)\r\n",
                     new UTF8Encoding(false));
                 var version2 = new ConfigurationStore(version2Path).LoadOrCreate();
-                Equal(13, version2.Application.ConfigVersion, "version 2 configuration is upgraded");
+                Equal(14, version2.Application.ConfigVersion, "version 2 configuration is upgraded");
                 Equal("Auto (UTF-8/Windows-1251/OEM)", version2.Localization.Languages["en"]["Script.Encoding.Auto"],
                     "old default English Auto label is migrated");
                 Equal("Авто (UTF-8/Windows-1251/OEM)", version2.Localization.Languages["ru"]["Script.Encoding.Auto"],
@@ -221,7 +224,7 @@ namespace CmdsManager.Tests
                     "[Strings.ru]\r\nSettings.Title=Настройки CmdsManager\r\n",
                     new UTF8Encoding(false));
                 var version5 = new ConfigurationStore(version5Path).LoadOrCreate();
-                Equal(13, version5.Application.ConfigVersion, "version 5 configuration is upgraded");
+                Equal(14, version5.Application.ConfigVersion, "version 5 configuration is upgraded");
                 Equal("Cmds Manager settings", version5.Localization.Languages["en"]["Settings.Title"],
                     "old default English brand is migrated");
                 Equal("Настройки Cmds Manager", version5.Localization.Languages["ru"]["Settings.Title"],
@@ -230,7 +233,7 @@ namespace CmdsManager.Tests
                 var version6Path = Path.Combine(directory, "Version6.ini");
                 File.WriteAllText(version6Path, "[Application]\r\nConfigVersion=6\r\n", new UTF8Encoding(false));
                 var version6 = new ConfigurationStore(version6Path).LoadOrCreate();
-                Equal(13, version6.Application.ConfigVersion, "version 6 configuration is upgraded");
+                Equal(14, version6.Application.ConfigVersion, "version 6 configuration is upgraded");
                 Equal(ApplicationTheme.System, version6.Application.Theme,
                     "existing installations default to the system application theme");
                 Assert(File.ReadAllText(version6Path, Encoding.UTF8).Contains("Theme=System"),
@@ -246,7 +249,7 @@ namespace CmdsManager.Tests
                     "Name=Version 7 script\r\nPath=" + scriptPath + "\r\n",
                     new UTF8Encoding(false));
                 var version7 = new ConfigurationStore(version7Path).LoadOrCreate();
-                Equal(13, version7.Application.ConfigVersion, "version 7 configuration is upgraded");
+                Equal(14, version7.Application.ConfigVersion, "version 7 configuration is upgraded");
                 Equal(false, version7.Scripts[0].Launch.WordWrap,
                     "existing scripts receive the default disabled word-wrap setting");
                 var version7Text = File.ReadAllText(version7Path, Encoding.UTF8);
@@ -263,7 +266,7 @@ namespace CmdsManager.Tests
                     "[Strings.ru]\r\nAbout.Build=Сборка: {0}\r\n",
                     new UTF8Encoding(false));
                 var version8 = new ConfigurationStore(version8Path).LoadOrCreate();
-                Equal(13, version8.Application.ConfigVersion, "version 8 configuration is upgraded");
+                Equal(14, version8.Application.ConfigVersion, "version 8 configuration is upgraded");
                 Equal(256, version8.Application.ConsoleBufferSizeKb, "version 8 receives the default console buffer");
                 Equal(false, version8.Application.ConsoleAutoRecord, "version 8 keeps automatic recording disabled");
                 Equal(50, version8.Application.ConsoleLogMaxSizeMb, "version 8 receives the default console log limit");
@@ -279,7 +282,7 @@ namespace CmdsManager.Tests
                 var version9Path = Path.Combine(directory, "Version9.ini");
                 File.WriteAllText(version9Path, "[Application]\r\nConfigVersion=9\r\n", new UTF8Encoding(false));
                 var version9 = new ConfigurationStore(version9Path).LoadOrCreate();
-                Equal(13, version9.Application.ConfigVersion, "version 9 configuration is upgraded");
+                Equal(14, version9.Application.ConfigVersion, "version 9 configuration is upgraded");
                 Equal(false, version9.Application.ShowAppHotkeyEnabled,
                     "version 9 keeps Show App Hotkey disabled by default");
                 Equal("Ctrl+Alt+M", version9.Application.ShowAppHotkey,
@@ -294,7 +297,7 @@ namespace CmdsManager.Tests
                     "[Application]\r\nConfigVersion=10\r\nShowAppHotkeyEnabled=false\r\nShowAppHotkey=\r\n",
                     new UTF8Encoding(false));
                 var version10 = new ConfigurationStore(version10Path).LoadOrCreate();
-                Equal(13, version10.Application.ConfigVersion, "version 10 configuration is upgraded");
+                Equal(14, version10.Application.ConfigVersion, "version 10 configuration is upgraded");
                 Equal(false, version10.Application.ShowAppHotkeyEnabled,
                     "version 10 keeps Show App Hotkey disabled by default");
                 Equal("Ctrl+Alt+M", version10.Application.ShowAppHotkey,
@@ -309,7 +312,7 @@ namespace CmdsManager.Tests
                     "[Strings.ru]\r\nSettings.ShowAppHotkey=Хоткей Показать приложение\r\n",
                     new UTF8Encoding(false));
                 var version11 = new ConfigurationStore(version11Path).LoadOrCreate();
-                Equal(13, version11.Application.ConfigVersion, "version 11 configuration is upgraded");
+                Equal(14, version11.Application.ConfigVersion, "version 11 configuration is upgraded");
                 Equal(true, version11.Application.Hotkeys[HotkeyAction.ShowApp].Enabled,
                     "version 11 keeps the configured Show App hotkey enabled");
                 Equal("Ctrl+Shift+M", version11.Application.Hotkeys[HotkeyAction.ShowApp].Gesture,
@@ -338,7 +341,7 @@ namespace CmdsManager.Tests
                     "Name=Unfiled script\r\nPath=" + scriptPath + "\r\n",
                     new UTF8Encoding(false));
                 var version12 = new ConfigurationStore(version12Path).LoadOrCreate();
-                Equal(13, version12.Application.ConfigVersion, "version 12 configuration is upgraded");
+                Equal(14, version12.Application.ConfigVersion, "version 12 configuration is upgraded");
                 Equal(null, version12.Scripts[0].FolderId,
                     "version 12 scripts remain outside folders after migration");
                 Equal(0, version12.Scripts[0].SortOrder,
@@ -514,7 +517,7 @@ namespace CmdsManager.Tests
                 @"..\..\..\..\Readme.txt"));
             Assert(File.Exists(readmePath), "release Readme.txt exists at the repository root");
             var guide = File.ReadAllText(readmePath, Encoding.UTF8);
-            Assert(guide.StartsWith("CMDS MANAGER 1.4.0", StringComparison.Ordinal),
+            Assert(guide.StartsWith("CMDS MANAGER 1.5.0", StringComparison.Ordinal),
                 "user guide identifies the stable release");
             foreach (var heading in new[]
             {
@@ -528,7 +531,7 @@ namespace CmdsManager.Tests
 
             foreach (var version in new[]
             {
-                "1.4.0", "1.3.0", "1.2.0", "1.1.6", "1.1.5", "1.1.4", "1.1.3", "1.1.2", "1.1.1", "1.1.0", "1.0.0", "0.6.6", "0.6.5", "0.6.4", "0.6.3", "0.6.2", "0.6.1", "0.6.0",
+                "1.5.0", "1.4.0", "1.3.0", "1.2.0", "1.1.6", "1.1.5", "1.1.4", "1.1.3", "1.1.2", "1.1.1", "1.1.0", "1.0.0", "0.6.6", "0.6.5", "0.6.4", "0.6.3", "0.6.2", "0.6.1", "0.6.0",
                 "0.5.1", "0.5.0", "0.4.2", "0.4.1", "0.4.0", "0.3.0", "0.2.1", "0.2.0", "0.1.0-dev"
             })
             {
@@ -557,7 +560,7 @@ namespace CmdsManager.Tests
                 "MainWindowPlacementSaved", "MainWindowX", "MainWindowY", "MainWindowWidth",
                 "MainWindowHeight", "MainWindowMaximized", "EditorPath", "EditorArguments", "LogLevel",
                 "LogRetentionDays", "LogScriptOutput", "ConsoleFontName", "ConsoleFontSize",
-                "ConsolePaneHeight", "ConsoleBufferSizeKb", "ConsoleAutoRecord", "ConsoleLogMaxSizeMb",
+                "ConsolePaneHeight", "ConsoleBufferSizeKb", "ConsoleLaunchBehavior", "ConsoleAutoRecord", "ConsoleLogMaxSizeMb",
                 "ConsoleForegroundColor", "ConsoleBackgroundColor",
                 "ConsoleBackgroundOpacity", "ConsoleTabForegroundColor", "ConsoleActiveTabForegroundColor",
                 "ConsoleTabBackgroundColor", "ConsoleTabBackgroundOpacity", "ConsoleActiveTabBackgroundColor",
@@ -962,7 +965,7 @@ namespace CmdsManager.Tests
                     Assert(about.ClientSize.Width <= 580 && about.ClientSize.Height <= 300,
                         "About box remains compact with a 128 px icon");
                     Assert(settings.ClientSize.Width <= 530 && settings.ClientSize.Height <= 340, "settings dialog is narrower and compact");
-                    Assert(script.ClientSize.Width <= 570 && script.ClientSize.Height <= 505,
+                    Assert(script.ClientSize.Width <= 570 && script.ClientSize.Height <= 537,
                         "aligned script editor remains compact");
                     Assert(folder.ClientSize.Width <= 480 && folder.ClientSize.Height <= 140,
                         "folder editor keeps only the compact integrated name field");
@@ -1282,12 +1285,16 @@ namespace CmdsManager.Tests
                     Assert(alignedTextInputs.Select(control => AbsoluteLeft(control, script)).Distinct().Count() == 1,
                         "script text boxes share one left edge");
                     var alignedCombos = AllControls(script).OfType<ComboBox>().ToArray();
-                    Equal(5, alignedCombos.Length, "script editor exposes the folder and four launch selectors");
+                    Equal(6, alignedCombos.Length, "script editor exposes the folder and five launch selectors");
                     Assert(alignedCombos.Select(control => AbsoluteLeft(control, script)).Distinct().Count() == 1,
                         "script drop-downs share one left edge");
+                    settingsTabs.SelectedTab = settingsTabs.TabPages.Cast<TabPage>()
+                        .Single(page => page.Text == text["Settings.Tab.Console"]);
+                    settings.Show();
+                    settings.PerformLayout();
                     var fluentCombos = AllControls(settings).OfType<FluentComboBox>()
                         .Concat(alignedCombos.OfType<FluentComboBox>()).ToArray();
-                    Assert(fluentCombos.Length == 7 && fluentCombos.All(control =>
+                    Assert(fluentCombos.Length == 9 && fluentCombos.All(control =>
                             control.Region == null && HasSymmetricControlBounds(control)),
                         "all drop-down fields use one symmetric antialiased contour without a clipped Region");
                     Assert(fluentNumeric.All(control => control.Region == null && control.BackColor.A == 0 &&
@@ -1343,7 +1350,7 @@ namespace CmdsManager.Tests
                         "embedded 128 px PNG icon frame is decoded without pixel corruption");
                     var aboutTitle = AllControls(about).OfType<Label>().First(control => control.Text == "Cmds Manager");
                     var aboutVersion = AllControls(about).OfType<Label>().First(control => control.Text.StartsWith("Version ", StringComparison.Ordinal));
-                    Equal("Version 1.4.0", aboutVersion.Text, "About contains the stable release version");
+                    Equal("Version 1.5.0", aboutVersion.Text, "About contains the stable release version");
                     var aboutBuild = AllControls(about).OfType<Label>()
                         .First(control => control.Text.StartsWith("Built on: ", StringComparison.Ordinal));
                     DateTime parsedBuildTimestamp;
@@ -2344,7 +2351,7 @@ namespace CmdsManager.Tests
                 {
                     var formHandle = form.Handle;
                     Assert(formHandle != IntPtr.Zero, "main form handle is created for queued UI updates");
-                    Equal("Cmds Manager 1.4.0", form.Text,
+                    Equal("Cmds Manager 1.5.0", form.Text,
                         "main window title contains the spaced product name and version");
                     var grid = FindControl<DataGridView>(form);
                     Assert(grid != null && grid.Columns.Contains("Activity"), "main grid has an activity indicator column");

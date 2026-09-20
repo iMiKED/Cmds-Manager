@@ -34,13 +34,15 @@ namespace CmdsManager.Application
 
     public sealed class ScriptOutputEventArgs : EventArgs
     {
-        public ScriptOutputEventArgs(Guid scriptId, int processId, string line, bool isError, byte[] rawBytes = null)
+        public ScriptOutputEventArgs(Guid scriptId, int processId, string line, bool isError, byte[] rawBytes = null,
+            Guid instanceId = default(Guid))
         {
             ScriptId = scriptId;
             ProcessId = processId;
             Line = line ?? string.Empty;
             IsError = isError;
             RawBytes = rawBytes;
+            InstanceId = instanceId;
         }
 
         public Guid ScriptId { get; }
@@ -48,12 +50,14 @@ namespace CmdsManager.Application
         public string Line { get; }
         public bool IsError { get; }
         public byte[] RawBytes { get; }
+        public Guid InstanceId { get; }
     }
 
     public sealed class ScriptInstanceEventArgs : EventArgs
     {
         public ScriptInstanceEventArgs(Guid scriptId, string scriptName, int processId, DateTime startedAt,
-            bool capturesOutput, int? exitCode, ScriptOutputEncoding outputEncoding = ScriptOutputEncoding.Auto)
+            bool capturesOutput, int? exitCode, ScriptOutputEncoding outputEncoding = ScriptOutputEncoding.Auto,
+            Guid instanceId = default(Guid))
         {
             ScriptId = scriptId;
             ScriptName = scriptName ?? string.Empty;
@@ -62,6 +66,7 @@ namespace CmdsManager.Application
             CapturesOutput = capturesOutput;
             ExitCode = exitCode;
             OutputEncoding = outputEncoding;
+            InstanceId = instanceId;
         }
 
         public Guid ScriptId { get; }
@@ -71,6 +76,7 @@ namespace CmdsManager.Application
         public bool CapturesOutput { get; }
         public int? ExitCode { get; }
         public ScriptOutputEncoding OutputEncoding { get; }
+        public Guid InstanceId { get; }
     }
 
     public sealed class ConsoleTabCloseRequestedEventArgs : EventArgs

@@ -1,4 +1,4 @@
-CMDS MANAGER 1.4.0
+CMDS MANAGER 1.5.0
 ==================
 
 Website: https://github.com/iMiKED/cmds-manager
@@ -83,6 +83,9 @@ unless the selected folder allows the application to update its INI and logs.
 - record each console to a dedicated UTF-8 log automatically or on demand,
   pause and resume recording, stop it, and enforce a per-file size limit;
 - use one neighboring console tab for every managed process instance;
+- reuse the previous console with its history on restart by default, or open
+  a new console while keeping or closing the previous one;
+- configure console launch behavior globally and override it per script;
 - reorder open consoles by dragging their tab labels, with an insertion marker
   and automatic scrolling at the edges of the strip;
 - scroll an overflowing tab strip with the mouse wheel while hovering over it,
@@ -112,8 +115,30 @@ unless the selected folder allows the application to update its INI and logs.
 5. CONSOLE TABS AND CHILD SCRIPTS
 ---------------------------------
 
-Every managed launch has a separate console tab. Closing the tab of a running
-process requests that exact process to stop.
+Closing the tab of a running process requests that exact process to stop.
+Stopping a script leaves its console available for reading. The next successful
+captured launch applies Settings > Console > Console on launch:
+
+- Reuse previous console (default): append new output to the most recently
+  started completed console for this script without clearing existing text.
+- New console, keep previous: open a new tab and retain the preceding console.
+- New console, close previous: replace the most recent completed console with
+  a new empty tab. Older archived consoles, if any, remain available.
+
+In the script editor, Console on launch defaults to Use global setting. Select
+any explicit mode to override the global choice for that script. Inherited
+scripts follow future global changes automatically. Parallel running instances
+always have separate consoles; a running console is never reused or replaced.
+Failed starts leave previous consoles untouched. These options only affect
+captured consoles inside Cmds Manager, not external interpreter windows.
+
+Reuse preserves the tab's position, font, encoding, Word Wrap, Scroll Lock,
+detached/full-screen window, and history subject to the configured buffer limit.
+ANSI formatting starts fresh for the new process without changing old text.
+Automatic recording starts a new log per run and does not copy previous history.
+Managed child launches inherit the parent script's choice, but keep their own
+consoles. The same child path, working directory, and arguments identify its
+previous console within the same parent script for the current app session.
 
 Drag a tab label with the left mouse button to change the order of open consoles.
 The marker shows where the tab will be inserted on release. Hold it near either
@@ -202,6 +227,16 @@ https://github.com/iMiKED/cmds-manager?tab=readme-ov-file#support-the-project
 ------------------
 
 The history below is derived from the Git commits of the application.
+
+1.5.0 - 20.09.2026
+- Added global console launch behavior: reuse without clearing history (default),
+  new console retaining the previous one, or new console replacing it;
+- added per-script overrides with dynamic inheritance from global settings;
+- preserved console settings and detached windows on reuse, isolated parallel
+  instances, and applied parent settings to repeated managed child launches;
+- separated recording files and ANSI state between runs; immediate restart waits
+  for the preceding process's exit notification and buffered output;
+- upgraded INI schema to 14 with automatic migration from existing versions.
 
 1.4.0 - 13.09.2026
 - Added drag-and-drop ordering of open console tabs, an insertion marker,
@@ -371,9 +406,9 @@ variables such as %SystemRoot% are expanded.
 [Application]
 
 ConfigVersion
-  INI schema version maintained by Cmds Manager. Current value: 13. Do not
-  lower it manually. Configurations from versions 1 through 12 are migrated to
-  13.
+  INI schema version maintained by Cmds Manager. Current value: 14. Do not
+  lower it manually. Configurations from versions 1 through 13 are migrated to
+  14.
 
 Theme
   Application shell theme: System, Light, or Dark. Default: System.
@@ -446,9 +481,17 @@ ConsoleBufferSizeKb
   exceeded, the oldest text is trimmed to leave approximately 75 percent of
   the configured capacity. Allowed range: 64 through 1048576. Default: 256.
 
+ConsoleLaunchBehavior
+  Global console behavior on successful captured launch or restart. Reuse
+  appends to the most recent completed console of the same script (default).
+  NewKeepPrevious opens a new console and retains the preceding console.
+  NewClosePrevious opens a new console and closes the most recent completed
+  console. Running parallel instances are never reused or closed by this rule.
+  Script entries can override this value. Stopping alone does not close a tab.
+
 ConsoleAutoRecord
-  true starts a dedicated UTF-8 log for every new captured console. The files
-  are stored under logs\console. Default: false.
+  true starts a dedicated UTF-8 log for every captured run, including when its
+  console is reused. Files are stored under logs\console. Default: false.
 
 ConsoleLogMaxSizeMb
   Hard maximum size of one dedicated console log file, in MiB. Recording stops
@@ -708,6 +751,12 @@ OutputEncoding
 WordWrap
   Persistent Word Wrap for this script and its managed child tabs.
 
+ConsoleLaunchBehavior
+  Inherit (default) dynamically uses [Application] ConsoleLaunchBehavior.
+  Reuse, NewKeepPrevious, or NewClosePrevious explicitly override the global
+  setting. Managed child scripts inherit this script's effective mode while
+  retaining separate consoles. This key is not part of [Defaults].
+
 AllowParallelInstances
   Allows simultaneous instances of this entry.
 
@@ -834,8 +883,33 @@ Files, если выбранная папка не позволяет обнов
 5. ВКЛАДКИ КОНСОЛИ И ДОЧЕРНИЕ СКРИПТЫ
 -------------------------------------
 
-Каждый управляемый запуск получает отдельную вкладку консоли. Закрытие вкладки
-работающего процесса запрашивает остановку именно этого процесса.
+Закрытие вкладки работающего процесса запрашивает остановку именно этого
+процесса. После остановки консоль остаётся доступной для чтения. При следующем
+успешном запуске с перехватом вывода применяется настройка
+«Настройки > Консоль > Консоль при запуске»:
+
+- «Переиспользовать консоль» (по умолчанию): дописать новый вывод в консоль
+  последнего запущенного и уже завершённого экземпляра этого скрипта,
+  не очищая прежний текст.
+- «Новая, сохранить прежнюю»: открыть новую вкладку, оставив предыдущую.
+- «Новая, закрыть прежнюю»: заменить последнюю завершённую консоль новой
+  пустой вкладкой. Более старые архивные консоли, если они есть, сохраняются.
+
+В редакторе скрипта «Консоль при запуске» по умолчанию имеет значение
+«Глобальная настройка». Выбор конкретного режима переопределяет общее правило
+для этого скрипта. При наследовании последующие изменения глобального режима
+применяются автоматически. Параллельные работающие экземпляры всегда имеют
+раздельные консоли: работающая консоль не переиспользуется и не заменяется.
+Неудачный запуск не изменяет старые консоли. Настройка действует только на
+консоли с перехватом в Cmds Manager, не на внешние окна интерпретаторов.
+
+При переиспользовании сохраняются место вкладки, шрифт, кодировка, Word Wrap,
+Scroll Lock, отделённое/полноэкранное окно и история в пределах лимита буфера.
+Состояние ANSI нового процесса сбрасывается, оформление старого текста остаётся.
+Автозапись создаёт новый журнал для каждого запуска без копирования истории.
+Управляемые дочерние запуски наследуют режим родителя, но сохраняют собственные
+консоли. В рамках одного родителя прежнюю консоль дочернего запуска определяют
+путь, рабочая папка и аргументы; сопоставление действует до выхода из приложения.
 
 Чтобы изменить порядок открытых консолей, перетащите ярлык вкладки левой кнопкой
 мыши. Маркер показывает место вставки после отпускания кнопки. Задержите вкладку
@@ -927,6 +1001,16 @@ https://github.com/iMiKED/cmds-manager?tab=readme-ov-file#support-the-project
 -----------------
 
 История составлена по Git-коммитам приложения.
+
+1.5.0 — 20.09.2026
+- Добавлена глобальная настройка консоли при запуске: переиспользование без
+  очистки истории (по умолчанию), новая консоль с сохранением либо заменой старой;
+- добавлено переопределение режима для скрипта с динамическим наследованием;
+- при переиспользовании сохраняются настройки и отделённое окно, параллельные
+  экземпляры изолированы, повторные дочерние запуски наследуют режим родителя;
+- журналы и состояние ANSI разделены по запускам; немедленный перезапуск ждёт
+  уведомления о завершении старого процесса и обработки его вывода;
+- схема INI обновлена до 14 с автоматической миграцией существующих настроек.
 
 1.4.0 — 13.09.2026
 - Добавлены изменение порядка открытых консолей перетаскиванием вкладок,
@@ -1102,8 +1186,8 @@ INI хранится рядом с CmdsManager.exe в UTF-8. Логически�
 [Application]
 
 ConfigVersion
-  Версия схемы INI, которой управляет Cmds Manager. Текущее значение: 13.
-  Не уменьшайте её вручную. Конфигурации версий 1–12 мигрируют в версию 13.
+  Версия схемы INI, которой управляет Cmds Manager. Текущее значение: 14.
+  Не уменьшайте её вручную. Конфигурации версий 1–13 мигрируют в версию 14.
 
 Theme
   Тема оболочки: System, Light или Dark. По умолчанию: System.
@@ -1178,9 +1262,18 @@ ConsoleBufferSizeKb
   самая старая часть удаляется так, чтобы осталось около 75 процентов заданного
   объёма. Допустимо: 64–1048576. По умолчанию: 256.
 
+ConsoleLaunchBehavior
+  Глобальный режим консоли при успешном запуске/перезапуске с перехватом вывода.
+  Reuse дописывает вывод в последнюю завершённую консоль скрипта (по умолчанию).
+  NewKeepPrevious открывает новую консоль, оставляя предыдущую.
+  NewClosePrevious открывает новую, закрывая последнюю завершённую консоль.
+  Работающие параллельные экземпляры это правило не закрывает и не объединяет.
+  Скрипт может переопределить режим. Сама остановка вкладку не закрывает.
+
 ConsoleAutoRecord
-  true автоматически запускает отдельный UTF-8-журнал для каждой новой
-  перехватываемой консоли. Файлы хранятся в logs\console. По умолчанию: false.
+  true автоматически запускает отдельный UTF-8-журнал при каждом запуске с
+  перехватом, в том числе при переиспользовании консоли. Файлы хранятся в
+  logs\console. По умолчанию: false.
 
 ConsoleLogMaxSizeMb
   Жёсткий предел размера одного отдельного журнала консоли в МиБ. При достижении
@@ -1451,6 +1544,12 @@ OutputEncoding
 
 WordWrap
   Сохраняемый перенос строк для скрипта и его управляемых дочерних вкладок.
+
+ConsoleLaunchBehavior
+  Inherit (по умолчанию) динамически наследует ConsoleLaunchBehavior из
+  [Application]. Reuse, NewKeepPrevious и NewClosePrevious явно переопределяют
+  глобальное значение. Управляемые дочерние скрипты наследуют итоговый режим
+  родителя, сохраняя отдельные консоли. Ключ не входит в раздел [Defaults].
 
 AllowParallelInstances
   Разрешает одновременные экземпляры этой записи.

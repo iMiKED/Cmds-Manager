@@ -33,7 +33,7 @@ namespace CmdsManager.Infrastructure.Configuration
 
     public sealed class ConfigurationStore
     {
-        private const int CurrentVersion = 13;
+        private const int CurrentVersion = 14;
         private readonly object _sync = new object();
         private readonly UTF8Encoding _utf8 = new UTF8Encoding(false, true);
         private byte[] _loadedHash;
@@ -170,6 +170,7 @@ namespace CmdsManager.Infrastructure.Configuration
             app.ConsoleFontSize = ReadFloat(ini, "Application", "ConsoleFontSize", app.ConsoleFontSize, 6f, 48f);
             app.ConsolePaneHeight = ReadInt(ini, "Application", "ConsolePaneHeight", app.ConsolePaneHeight, 100, 4000);
             app.ConsoleBufferSizeKb = ReadInt(ini, "Application", "ConsoleBufferSizeKb", app.ConsoleBufferSizeKb, 64, 1048576);
+            app.ConsoleLaunchBehavior = ReadEnum(ini, "Application", "ConsoleLaunchBehavior", ConsoleLaunchBehavior.Reuse);
             app.ConsoleAutoRecord = ReadBool(ini, "Application", "ConsoleAutoRecord", false);
             app.ConsoleLogMaxSizeMb = ReadInt(ini, "Application", "ConsoleLogMaxSizeMb", app.ConsoleLogMaxSizeMb, 1, 4096);
             app.ConsoleForegroundColor = ini.Get("Application", "ConsoleForegroundColor", app.ConsoleForegroundColor);
@@ -276,6 +277,7 @@ namespace CmdsManager.Infrastructure.Configuration
 
             if (includeAutoStart)
             {
+                profile.ConsoleLaunchBehavior = ReadEnum(ini, section, "ConsoleLaunchBehavior", ConsoleLaunchBehavior.Inherit);
                 profile.AutoStartWithApplication = ReadBool(ini, section, "AutoStartWithApplication", false);
                 profile.AutoStartOrder = ReadInt(ini, section, "AutoStartOrder", 100, int.MinValue, int.MaxValue);
                 profile.AutoStartDelaySeconds = ReadInt(ini, section, "AutoStartDelaySeconds", 0, 0, 86400);
@@ -311,6 +313,7 @@ namespace CmdsManager.Infrastructure.Configuration
             ini.Set("Application", "ConsoleFontSize", app.ConsoleFontSize.ToString("0.##", CultureInfo.InvariantCulture));
             ini.Set("Application", "ConsolePaneHeight", app.ConsolePaneHeight);
             ini.Set("Application", "ConsoleBufferSizeKb", app.ConsoleBufferSizeKb);
+            ini.Set("Application", "ConsoleLaunchBehavior", app.ConsoleLaunchBehavior);
             ini.Set("Application", "ConsoleAutoRecord", Bool(app.ConsoleAutoRecord));
             ini.Set("Application", "ConsoleLogMaxSizeMb", app.ConsoleLogMaxSizeMb);
             ini.Set("Application", "ConsoleForegroundColor", app.ConsoleForegroundColor ?? "#DCDCDC");
@@ -389,6 +392,7 @@ namespace CmdsManager.Infrastructure.Configuration
             ini.Set(section, "AllowParallelInstances", Bool(profile.AllowParallelInstances));
             if (includeAutoStart)
             {
+                ini.Set(section, "ConsoleLaunchBehavior", profile.ConsoleLaunchBehavior);
                 ini.Set(section, "AutoStartWithApplication", Bool(profile.AutoStartWithApplication));
                 ini.Set(section, "AutoStartOrder", profile.AutoStartOrder);
                 ini.Set(section, "AutoStartDelaySeconds", profile.AutoStartDelaySeconds);
@@ -423,6 +427,10 @@ namespace CmdsManager.Infrastructure.Configuration
             }
 
             ValidateHotkeys(configuration.Application.Hotkeys);
+
+            if (!Enum.IsDefined(typeof(ConsoleLaunchBehavior), configuration.Application.ConsoleLaunchBehavior) ||
+                configuration.Application.ConsoleLaunchBehavior == ConsoleLaunchBehavior.Inherit)
+                throw new ConfigurationValidationException("Application", "ConsoleLaunchBehavior", "select a concrete console launch behavior");
 
             if (string.IsNullOrWhiteSpace(configuration.Application.ConsoleFontName) || configuration.Application.ConsoleFontSize < 6f || configuration.Application.ConsoleFontSize > 48f)
             {

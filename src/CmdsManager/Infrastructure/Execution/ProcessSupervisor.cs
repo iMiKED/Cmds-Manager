@@ -16,6 +16,8 @@ namespace CmdsManager.Infrastructure.Execution
         private sealed class RunningProcess
         {
             internal Guid InstanceId { get; } = Guid.NewGuid();
+            internal TaskCompletionSource<bool> ExitCompleted { get; } =
+                new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             internal ScriptDefinition Script { get; set; }
             internal NativeProcess Native { get; set; }
             internal DateTime StartedAt { get; set; }
@@ -104,7 +106,7 @@ namespace CmdsManager.Infrastructure.Execution
                 }
 
                 InstanceStarted?.Invoke(this, new ScriptInstanceEventArgs(script.Id, script.Name, native.ProcessId,
-                    session.StartedAt, spec.CaptureOutput, null, spec.OutputEncoding));
+                    session.StartedAt, spec.CaptureOutput, null, spec.OutputEncoding, session.InstanceId));
                 session.OutputTask = StartReader(session, native.StandardOutput, false);
                 session.ErrorTask = StartReader(session, native.StandardError, true);
                 Task.Factory.StartNew(
@@ -149,13 +151,14 @@ namespace CmdsManager.Infrastructure.Execution
             }
 
             PublishCurrent(scriptId, ScriptRuntimeState.Stopping, sessions[0].Native.ProcessId, sessions[0].StartedAt, null, string.Empty);
-            return Task.Factory.StartNew(() =>
+            return Task.Run(async () =>
             {
                 foreach (var session in sessions)
                 {
                     StopOne(session);
                 }
-            }, CancellationToken.None, TaskCreationOptions.None, TaskScheduler.Default);
+                await Task.WhenAll(sessions.Select(session => session.ExitCompleted.Task)).ConfigureAwait(false);
+            });
         }
 
         public Task StopAllAsync()
@@ -187,8 +190,11 @@ namespace CmdsManager.Infrastructure.Execution
 
             if (onlyInstance)
                 PublishCurrent(scriptId, ScriptRuntimeState.Stopping, processId, session.StartedAt, null, string.Empty);
-            return Task.Factory.StartNew(() => StopOne(session), CancellationToken.None,
-                TaskCreationOptions.None, TaskScheduler.Default);
+            return Task.Run(async () =>
+            {
+                StopOne(session);
+                await session.ExitCompleted.Task.ConfigureAwait(false);
+            });
         }
 
         public ScriptRuntimeSnapshot GetSnapshot(Guid scriptId)
@@ -263,7 +269,7 @@ namespace CmdsManager.Infrastructure.Execution
                     while ((line = reader.ReadOutputLine()) != null)
                     {
                         OutputReceived?.Invoke(this, new ScriptOutputEventArgs(session.Script.Id,
-                            session.Native.ProcessId, line.Text, isError, line.Bytes));
+                            session.Native.ProcessId, line.Text, isError, line.Bytes, session.InstanceId));
                         if (_logScriptOutput())
                         {
                             _log.Information("Script '" + SafeName(session.Script.Name) + "' " +
@@ -281,6 +287,20 @@ namespace CmdsManager.Infrastructure.Execution
         }
 
         private void WaitForExit(RunningProcess session)
+        {
+            try
+            {
+                CompleteExit(session);
+                session.ExitCompleted.TrySetResult(true);
+            }
+            catch (Exception exception)
+            {
+                session.ExitCompleted.TrySetException(exception);
+                _log.Error("Failed to complete process cleanup.", exception);
+            }
+        }
+
+        private void CompleteExit(RunningProcess session)
         {
             var waitResult = NativeMethods.WaitForSingleObject(session.Native.ProcessHandle, NativeMethods.Infinite);
             uint rawExitCode = 1;
@@ -310,6 +330,12 @@ namespace CmdsManager.Infrastructure.Execution
             }
 
             session.Native.Dispose();
+
+            // Queue the terminal event before making this script available for a
+            // new non-parallel launch, including after a natural process exit.
+            InstanceExited?.Invoke(this, new ScriptInstanceEventArgs(session.Script.Id, session.Script.Name,
+                session.Native.ProcessId, session.StartedAt, session.CapturesOutput, exitCode,
+                session.Script.Launch.OutputEncoding, session.InstanceId));
 
             ScriptRuntimeSnapshot snapshot;
             lock (_sync)
@@ -358,9 +384,6 @@ namespace CmdsManager.Infrastructure.Execution
             }
 
             _log.Information("Script '" + SafeName(session.Script.Name) + "' exited with code " + exitCode + ".");
-            InstanceExited?.Invoke(this, new ScriptInstanceEventArgs(session.Script.Id, session.Script.Name,
-                session.Native.ProcessId, session.StartedAt, session.CapturesOutput, exitCode,
-                session.Script.Launch.OutputEncoding));
             StateChanged?.Invoke(this, new ScriptStateChangedEventArgs(CloneSnapshot(snapshot)));
         }
 

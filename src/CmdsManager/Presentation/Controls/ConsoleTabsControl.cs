@@ -66,6 +66,7 @@ namespace CmdsManager.Presentation.Controls
             internal string OriginalText { get; set; }
             internal bool IsError { get; set; }
             internal AnsiTextStyle AnsiStyleBefore { get; set; }
+            internal bool StartsNewRun { get; set; }
         }
 
         private sealed class ConsoleRenderRun
@@ -102,6 +103,10 @@ namespace CmdsManager.Presentation.Controls
 
         private sealed class ConsoleSession
         {
+            internal int Key { get; set; }
+            internal Guid InstanceId { get; set; }
+            internal bool HasStarted { get; set; }
+            internal bool StartsNewRun { get; set; } = true;
             internal Guid ScriptId { get; set; }
             internal string ScriptName { get; set; }
             internal int ProcessId { get; set; }
@@ -127,9 +132,12 @@ namespace CmdsManager.Presentation.Controls
         private readonly Func<ApplicationSettings> _settings;
         private readonly Func<HotkeySettings> _hotkeys;
         private readonly Func<Guid, bool> _wordWrapForScript;
+        private readonly Func<Guid, ConsoleLaunchBehavior> _consoleBehaviorForScript;
         private readonly string _consoleLogDirectory;
         private readonly ConcurrentQueue<ConsoleEvent> _events = new ConcurrentQueue<ConsoleEvent>();
         private readonly Dictionary<int, ConsoleSession> _sessions = new Dictionary<int, ConsoleSession>();
+        private readonly Dictionary<int, ConsoleSession> _processSessions = new Dictionary<int, ConsoleSession>();
+        private int _nextSessionKey = -1;
         private readonly HashSet<int> _suppressedProcesses = new HashSet<int>();
         private readonly TerminalTabStrip _tabStrip = new TerminalTabStrip
         {
@@ -189,19 +197,22 @@ namespace CmdsManager.Presentation.Controls
         private ApplicationTheme _applicationTheme = ApplicationTheme.System;
 
         public ConsoleTabsControl(LocalizationService text, Func<ApplicationSettings> settings,
-            Func<Guid, bool> wordWrapForScript = null, string consoleLogDirectory = null)
+            Func<Guid, bool> wordWrapForScript = null, string consoleLogDirectory = null,
+            Func<Guid, ConsoleLaunchBehavior> consoleBehaviorForScript = null)
             : this(text, settings, () => settings()?.Hotkeys ?? new HotkeySettings(),
-                wordWrapForScript, consoleLogDirectory)
+                wordWrapForScript, consoleLogDirectory, consoleBehaviorForScript)
         {
         }
 
         public ConsoleTabsControl(LocalizationService text, Func<ApplicationSettings> settings,
-            Func<HotkeySettings> hotkeys, Func<Guid, bool> wordWrapForScript, string consoleLogDirectory)
+            Func<HotkeySettings> hotkeys, Func<Guid, bool> wordWrapForScript, string consoleLogDirectory,
+            Func<Guid, ConsoleLaunchBehavior> consoleBehaviorForScript = null)
         {
             _text = text ?? throw new ArgumentNullException(nameof(text));
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _hotkeys = hotkeys ?? throw new ArgumentNullException(nameof(hotkeys));
             _wordWrapForScript = wordWrapForScript ?? (scriptId => false);
+            _consoleBehaviorForScript = consoleBehaviorForScript ?? (scriptId => ConsoleLaunchBehavior.Inherit);
             _consoleLogDirectory = Path.GetFullPath(string.IsNullOrWhiteSpace(consoleLogDirectory)
                 ? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs", "console")
                 : consoleLogDirectory);
@@ -422,7 +433,7 @@ namespace CmdsManager.Presentation.Controls
                 session.DetachedWindow.Show();
                 session.DetachedWindow.Activate();
             }
-            else _tabStrip.SelectTab(session.ProcessId);
+            else _tabStrip.SelectTab(session.Key);
         }
 
         public bool SelectAdjacentTab(int offset)
@@ -506,7 +517,6 @@ namespace CmdsManager.Presentation.Controls
             var batches = new Dictionary<int, ConsoleRenderBatch>();
             var recordingBatches = new Dictionary<int, StringBuilder>();
             var redraw = new HashSet<int>();
-            var exitedRecordings = new HashSet<int>();
             var bufferUnits = BufferUnits(_settings() ?? new ApplicationSettings());
             var processed = 0;
             ConsoleEvent item;
@@ -515,66 +525,79 @@ namespace CmdsManager.Presentation.Controls
                 processed++;
                 if (item.Kind == ConsoleEventKind.Started)
                 {
+                    FlushBatches(batches, recordingBatches, redraw);
                     _suppressedProcesses.Remove(item.Instance.ProcessId);
-                    var started = EnsureSession(item.Instance.ProcessId, item.Instance.ScriptId,
-                        item.Instance.ScriptName, item.Instance.StartedAt, item.Instance.OutputEncoding);
-                    _tabStrip.SelectTab(started.ProcessId);
+                    var started = StartSession(item.Instance);
+                    _tabStrip.SelectTab(started.Key);
                     continue;
                 }
 
                 if (item.Kind == ConsoleEventKind.Exited)
                 {
-                    ConsoleSession exited;
-                    if (_sessions.TryGetValue(item.Instance.ProcessId, out exited))
+                    FlushBatches(batches, recordingBatches, redraw);
+                    var exited = FindProcessSession(item.Instance.ProcessId, item.Instance.ScriptId, item.Instance.InstanceId);
+                    if (exited != null)
                     {
                         exited.ExitCode = item.Instance.ExitCode;
-                        UpdateTabTitle(exited);
-                        exitedRecordings.Add(exited.ProcessId);
+                        StopRecording(exited, true);
                     }
                     continue;
                 }
 
-                if (_suppressedProcesses.Contains(item.Output.ProcessId)) continue;
-                var session = EnsureSession(item.Output.ProcessId, item.Output.ScriptId,
-                    string.Empty, null, ScriptOutputEncoding.Auto);
+                var session = FindProcessSession(item.Output.ProcessId, item.Output.ScriptId, item.Output.InstanceId);
+                if (session == null)
+                {
+                    if (_suppressedProcesses.Contains(item.Output.ProcessId) || _processSessions.ContainsKey(item.Output.ProcessId)) continue;
+                    session = EnsureSession(item.Output.ProcessId, item.Output.ScriptId,
+                        string.Empty, null, ScriptOutputEncoding.Auto, item.Output.InstanceId);
+                }
                 var historyLine = new ConsoleHistoryLine
                 {
                     RawBytes = item.Output.RawBytes,
                     OriginalText = item.Output.Line,
                     IsError = item.Output.IsError,
-                    AnsiStyleBefore = session.AnsiParser.Style
+                    AnsiStyleBefore = session.AnsiParser.Style,
+                    StartsNewRun = session.StartsNewRun
                 };
+                session.StartsNewRun = false;
                 var decodedLine = DecodeLine(session, historyLine);
                 var parsedLine = session.AnsiParser.Parse(decodedLine + Environment.NewLine);
                 session.History.Enqueue(historyLine);
                 session.HistoryUnits += HistoryUnits(historyLine);
-                if (TrimHistory(session, bufferUnits)) redraw.Add(session.ProcessId);
+                if (TrimHistory(session, bufferUnits)) redraw.Add(session.Key);
 
                 if (session.Recorder != null && session.Recorder.State == ConsoleRecordingState.Recording)
                 {
                     StringBuilder recordingBuilder;
-                    if (!recordingBatches.TryGetValue(item.Output.ProcessId, out recordingBuilder))
+                    if (!recordingBatches.TryGetValue(session.Key, out recordingBuilder))
                     {
                         recordingBuilder = new StringBuilder();
-                        recordingBatches[item.Output.ProcessId] = recordingBuilder;
+                        recordingBatches[session.Key] = recordingBuilder;
                     }
                     recordingBuilder.Append(parsedLine.PlainText);
                 }
 
-                if (redraw.Contains(session.ProcessId)) continue;
+                if (redraw.Contains(session.Key)) continue;
                 ConsoleRenderBatch builder;
-                if (!batches.TryGetValue(item.Output.ProcessId, out builder))
+                if (!batches.TryGetValue(session.Key, out builder))
                 {
                     builder = new ConsoleRenderBatch();
-                    batches[item.Output.ProcessId] = builder;
+                    batches[session.Key] = builder;
                 }
                 builder.Append(parsedLine);
             }
 
-            foreach (var processId in redraw)
+            FlushBatches(batches, recordingBatches, redraw);
+            UpdateEmptyState();
+        }
+
+        private void FlushBatches(Dictionary<int, ConsoleRenderBatch> batches,
+            Dictionary<int, StringBuilder> recordingBatches, HashSet<int> redraw)
+        {
+            foreach (var key in redraw)
             {
                 ConsoleSession session;
-                if (_sessions.TryGetValue(processId, out session)) RenderSession(session);
+                if (_sessions.TryGetValue(key, out session)) RenderSession(session);
             }
             foreach (var batch in batches)
             {
@@ -588,20 +611,89 @@ namespace CmdsManager.Presentation.Controls
                 if (!_sessions.TryGetValue(batch.Key, out session) || session.Recorder == null) continue;
                 if (!session.Recorder.Write(batch.Value.ToString())) UpdateTabTitle(session);
             }
-            foreach (var processId in exitedRecordings)
+            batches.Clear();
+            recordingBatches.Clear();
+            redraw.Clear();
+        }
+
+        private ConsoleSession FindProcessSession(int processId, Guid scriptId, Guid instanceId)
+        {
+            ConsoleSession session;
+            if (_processSessions.TryGetValue(processId, out session) && session.ScriptId == scriptId &&
+                (instanceId == Guid.Empty || session.InstanceId == instanceId)) return session;
+            // Windows can recycle a PID while an older console is retained.
+            return instanceId == Guid.Empty ? null : _sessions.Values.FirstOrDefault(item =>
+                item.ProcessId == processId && item.ScriptId == scriptId && item.InstanceId == instanceId);
+        }
+
+        private ConsoleSession StartSession(ScriptInstanceEventArgs args)
+        {
+            var current = FindProcessSession(args.ProcessId, args.ScriptId, args.InstanceId);
+            if (current != null && !current.ExitCode.HasValue)
             {
-                ConsoleSession session;
-                if (_sessions.TryGetValue(processId, out session)) StopRecording(session, true);
+                if (!current.HasStarted)
+                {
+                    current.OutputEncoding = args.OutputEncoding;
+                    if (current.History.Count > 0) RenderSession(current);
+                }
+                current.HasStarted = true;
+                current.ScriptName = args.ScriptName;
+                current.StartedAt = args.StartedAt;
+                UpdateTabTitle(current);
+                return current;
             }
 
-            UpdateEmptyState();
+            var behavior = _consoleBehaviorForScript(args.ScriptId);
+            if (behavior == ConsoleLaunchBehavior.Inherit)
+                behavior = _settings()?.ConsoleLaunchBehavior ?? ConsoleLaunchBehavior.Reuse;
+            var previous = _sessions.Values.Where(session => session.ScriptId == args.ScriptId && session.ExitCode.HasValue)
+                .OrderByDescending(session => session.StartedAt).FirstOrDefault();
+            if (previous != null && behavior == ConsoleLaunchBehavior.Reuse)
+            {
+                UnbindProcess(previous);
+                previous.ProcessId = args.ProcessId;
+                previous.InstanceId = args.InstanceId;
+                previous.ScriptName = args.ScriptName;
+                previous.StartedAt = args.StartedAt;
+                previous.ExitCode = null;
+                previous.HasStarted = true;
+                previous.AnsiParser = new AnsiTextParser();
+                previous.StartsNewRun = true;
+                previous.AutomaticRecordingSuppressed = false;
+                previous.RecordingFailed = false;
+                _suppressedProcesses.Remove(args.ProcessId);
+                _processSessions[args.ProcessId] = previous;
+                TryStartAutomaticRecording(previous);
+                UpdateTabTitle(previous);
+                return previous;
+            }
+
+            if (previous != null && behavior == ConsoleLaunchBehavior.NewClosePrevious)
+                CloseSession(previous, false);
+            // A retained tab has its own key, independent of the latest process ID.
+            _processSessions.Remove(args.ProcessId);
+            _suppressedProcesses.Remove(args.ProcessId);
+            var created = EnsureSession(args.ProcessId, args.ScriptId, args.ScriptName,
+                args.StartedAt, args.OutputEncoding, args.InstanceId);
+            created.HasStarted = true;
+            return created;
+        }
+
+        private void UnbindProcess(ConsoleSession session)
+        {
+            ConsoleSession mapped;
+            if (_processSessions.TryGetValue(session.ProcessId, out mapped) && ReferenceEquals(mapped, session))
+            {
+                _processSessions.Remove(session.ProcessId);
+                _suppressedProcesses.Add(session.ProcessId);
+            }
         }
 
         private ConsoleSession EnsureSession(int processId, Guid scriptId, string scriptName,
-            DateTime? startedAt, ScriptOutputEncoding outputEncoding)
+            DateTime? startedAt, ScriptOutputEncoding outputEncoding, Guid instanceId = default(Guid))
         {
             ConsoleSession existing;
-            if (_sessions.TryGetValue(processId, out existing))
+            if (_processSessions.TryGetValue(processId, out existing))
             {
                 if (!string.IsNullOrWhiteSpace(scriptName))
                 {
@@ -616,6 +708,8 @@ namespace CmdsManager.Presentation.Controls
             }
 
             var wordWrap = _wordWrapForScript(scriptId);
+            var key = processId;
+            if (_sessions.ContainsKey(key)) key = --_nextSessionKey;
             var output = new RichTextBox
             {
                 Dock = DockStyle.Fill,
@@ -630,12 +724,14 @@ namespace CmdsManager.Presentation.Controls
                 ScrollBars = wordWrap ? RichTextBoxScrollBars.Vertical : RichTextBoxScrollBars.Both,
                 Font = _consoleFont ?? new Font(FontFamily.GenericMonospace, 10f),
                 ContextMenuStrip = _menu,
-                Tag = processId,
+                Tag = key,
                 Visible = false
             };
             output.KeyDown += HandleOutputKeyDown;
             var session = new ConsoleSession
             {
+                Key = key,
+                InstanceId = instanceId,
                 ScriptId = scriptId,
                 ScriptName = string.IsNullOrWhiteSpace(scriptName) ? "PID " + processId : scriptName,
                 ProcessId = processId,
@@ -644,9 +740,10 @@ namespace CmdsManager.Presentation.Controls
                 WordWrap = wordWrap,
                 Output = output
             };
-            _sessions[processId] = session;
+            _sessions[key] = session;
+            _processSessions[processId] = session;
             _contentHost.Controls.Add(output);
-            _tabStrip.AddTab(processId, string.Empty, string.Empty, true);
+            _tabStrip.AddTab(key, string.Empty, string.Empty, true);
             UpdateTabTitle(session);
             TryStartAutomaticRecording(session);
             return session;
@@ -696,8 +793,11 @@ namespace CmdsManager.Presentation.Controls
                 : new AnsiTextParser(session.AnsiParser.Style);
             var batch = new ConsoleRenderBatch();
             foreach (var line in session.History)
+            {
+                if (line.StartsNewRun) parser = new AnsiTextParser();
                 batch.Append(parser.Parse(DecodeLine(session, line) + Environment.NewLine));
-            session.AnsiParser = parser;
+            }
+            session.AnsiParser = session.StartsNewRun ? new AnsiTextParser() : parser;
             var skip = Math.Max(0, batch.Length - maximumUnits);
             output.Clear();
             AppendStyledRuns(output, batch, skip);
@@ -1310,7 +1410,7 @@ namespace CmdsManager.Presentation.Controls
             CloseFindWindow(session);
 
             _contentHost.Controls.Remove(session.Output);
-            _tabStrip.RemoveTab(session.ProcessId);
+            _tabStrip.RemoveTab(session.Key);
             session.Output.Visible = true;
             var window = new DetachedConsoleForm(DetachedWindowTitle(session), session.Output,
                 keyData => TryHandleSessionHotkey(session, keyData))
@@ -1337,9 +1437,9 @@ namespace CmdsManager.Presentation.Controls
             window.ClosePermanently();
             window.Dispose();
             _contentHost.Controls.Add(session.Output);
-            _tabStrip.AddTab(session.ProcessId, string.Empty, string.Empty, !session.ExitCode.HasValue);
+            _tabStrip.AddTab(session.Key, string.Empty, string.Empty, !session.ExitCode.HasValue);
             UpdateTabTitle(session);
-            _tabStrip.SelectTab(session.ProcessId);
+            _tabStrip.SelectTab(session.Key);
             UpdateEmptyState();
         }
 
@@ -1352,13 +1452,14 @@ namespace CmdsManager.Presentation.Controls
             }
         }
 
-        private void CloseSession(ConsoleSession session)
+        private void CloseSession(ConsoleSession session, bool notify = true)
         {
             var isRunning = !session.ExitCode.HasValue;
             CloseFindWindow(session);
             StopRecording(session, false);
-            _suppressedProcesses.Add(session.ProcessId);
-            _sessions.Remove(session.ProcessId);
+            UnbindProcess(session);
+            _sessions.Remove(session.Key);
+            if (ReferenceEquals(_contextSession, session)) _contextSession = null;
             if (session.DetachedWindow != null)
             {
                 session.DetachedWindow.ReleaseContent();
@@ -1369,13 +1470,14 @@ namespace CmdsManager.Presentation.Controls
             else
             {
                 _contentHost.Controls.Remove(session.Output);
-                _tabStrip.RemoveTab(session.ProcessId);
+                _tabStrip.RemoveTab(session.Key);
             }
             session.Output.Dispose();
             session.CustomFont?.Dispose();
             UpdateEmptyState();
-            CloseRequested?.Invoke(this,
-                new ConsoleTabCloseRequestedEventArgs(session.ScriptId, session.ProcessId, isRunning));
+            if (notify)
+                CloseRequested?.Invoke(this,
+                    new ConsoleTabCloseRequestedEventArgs(session.ScriptId, session.ProcessId, isRunning));
         }
 
         private static void CloseFindWindow(ConsoleSession session)
@@ -1392,7 +1494,7 @@ namespace CmdsManager.Presentation.Controls
             foreach (var session in _sessions.Values)
             {
                 if (session.DetachedWindow != null) continue;
-                var selected = session.ProcessId == args.Key;
+                var selected = session.Key == args.Key;
                 session.Output.Visible = selected;
                 if (selected) session.Output.BringToFront();
             }
@@ -1484,7 +1586,7 @@ namespace CmdsManager.Presentation.Controls
             }
             else
             {
-                _tabStrip.UpdateTab(session.ProcessId,
+                _tabStrip.UpdateTab(session.Key,
                     name + " [" + session.ProcessId + "] · " + status,
                     (session.ScriptName ?? string.Empty) + " [" + session.ProcessId + "] · " + status,
                     !session.ExitCode.HasValue);

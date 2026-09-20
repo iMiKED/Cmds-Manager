@@ -35,6 +35,7 @@ namespace CmdsManager.Presentation.Forms
         private readonly Dictionary<ToolStripButton, ToolbarIcon> _toolbarIcons =
             new Dictionary<ToolStripButton, ToolbarIcon>();
         private readonly Dictionary<Guid, Guid> _managedChildParents = new Dictionary<Guid, Guid>();
+        private readonly Dictionary<string, Guid> _managedChildIds = new Dictionary<string, Guid>(StringComparer.Ordinal);
         private readonly ConsoleTabsControl _console;
         private readonly SplitContainer _mainSplit;
         private readonly System.Windows.Forms.Timer _layoutSaveTimer = new System.Windows.Forms.Timer { Interval = 600 };
@@ -89,7 +90,7 @@ namespace CmdsManager.Presentation.Forms
             _console = new ConsoleTabsControl(_text, () => Configuration.Application,
                 () => Configuration.Application.Hotkeys, ResolveConsoleWordWrap,
                 Path.Combine(Path.GetDirectoryName(_store.ConfigPath) ?? AppDomain.CurrentDomain.BaseDirectory,
-                    "logs", "console"))
+                    "logs", "console"), ResolveConsoleLaunchBehavior)
                 { Dock = DockStyle.Fill };
 
             Text = ApplicationResources.WindowTitle;
@@ -257,6 +258,12 @@ namespace CmdsManager.Presentation.Forms
             {
                 var request = ManagedStartRequestParser.Parse(parentWorkingDirectory, startArguments);
                 var script = request.ToScriptDefinition();
+                var identity = parentScriptId.ToString("D") + "\0" + script.Path.ToUpperInvariant() + "\0" +
+                    script.Launch.WorkingDirectory.ToUpperInvariant() + "\0" + script.Launch.Arguments;
+                Guid childId;
+                if (!_managedChildIds.TryGetValue(identity, out childId))
+                    _managedChildIds[identity] = childId = script.Id;
+                script.Id = childId;
                 var owner = ResolveWordWrapOwner(parentScriptId);
                 var ownerScript = Configuration.Scripts.FirstOrDefault(item => item.Id == owner);
                 script.Launch.WordWrap = ownerScript?.Launch.WordWrap ?? Configuration.Defaults.WordWrap;
@@ -1427,7 +1434,6 @@ namespace CmdsManager.Presentation.Forms
 
         private async void HandleConsoleCloseRequested(object sender, ConsoleTabCloseRequestedEventArgs args)
         {
-            _managedChildParents.Remove(args.ScriptId);
             if (!args.IsRunning) return;
             try { await _supervisor.StopInstanceAsync(args.ScriptId, args.ProcessId); }
             catch (Exception exception) { ShowError(_text["Console.StopFailed"], exception); }
@@ -1461,6 +1467,13 @@ namespace CmdsManager.Presentation.Forms
             var owner = ResolveWordWrapOwner(scriptId);
             var script = Configuration.Scripts.FirstOrDefault(item => item.Id == owner);
             return script?.Launch.WordWrap ?? Configuration.Defaults.WordWrap;
+        }
+
+        private ConsoleLaunchBehavior ResolveConsoleLaunchBehavior(Guid scriptId)
+        {
+            var owner = ResolveWordWrapOwner(scriptId);
+            return Configuration.Scripts.FirstOrDefault(item => item.Id == owner)?.Launch.ConsoleLaunchBehavior
+                ?? ConsoleLaunchBehavior.Inherit;
         }
 
         private Guid ResolveWordWrapOwner(Guid scriptId)
