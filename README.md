@@ -12,7 +12,7 @@ maintained by [iMiKED from 4PDA](https://4pda.to/forum/index.php?showuser=101794
 [![Boosty](https://img.shields.io/badge/Boosty-donate-f15f2c)](https://boosty.to/danceworldtv/donate)
 [![Ozon Bank](https://img.shields.io/badge/Ozon%20Bank-SBP%20transfer-005BFF)](https://finance.ozon.ru/apps/sbp/ozonbankpay/019a0a87-1f4a-7df8-97c7-ef32ebf9a0e3)
 
-![Cmds Manager 1.0.0](docs/cmdsmanager1.0.0.png)
+![Cmds Manager 1.0.0](docs/cmdsmanager1.5.0.png)
 
 ## Description
 
